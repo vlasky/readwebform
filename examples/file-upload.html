@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>File Upload Form</title>
+</head>
+<body>
+    <h1>Document Upload</h1>
+    <p>Please upload your documents below.</p>
+
+    <form>
+        <label for="name">Your Name:</label>
+        <input type="text" id="name" name="name" required>
+        <br><br>
+
+        <label for="document">Select Document (PDF or DOCX):</label>
+        <input type="file" id="document" name="document" accept=".pdf,.docx" required>
+        <br><br>
+
+        <label for="notes">Notes (optional):</label>
+        <textarea id="notes" name="notes" rows="4"></textarea>
+        <br><br>
+
+        <button type="submit">Upload</button>
+    </form>
+</body>
+</html>
