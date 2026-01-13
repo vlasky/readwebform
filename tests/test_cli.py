@@ -102,6 +102,12 @@ class TestCLIParser:
 
         assert args.no_submit_button is True
 
+    def test_url_file(self):
+        parser = ReadWebFormArgumentParser()
+        args = parser.parse_args(['--url-file', '/tmp/url.txt'])
+
+        assert args.url_file == '/tmp/url.txt'
+
     def test_mutually_exclusive_html_htmlfile(self):
         parser = ReadWebFormArgumentParser()
         with pytest.raises(SystemExit):

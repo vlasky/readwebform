@@ -722,6 +722,93 @@ class TestCLIProcessBehavior:
             f"Should timeout around 3s with keep-alive, took {result['elapsed']:.2f}s"
 
 
+class TestUrlFile:
+    """Test --url-file functionality."""
+
+    def test_url_file_written(self):
+        """Test that URL is written to file when --url-file is specified."""
+        html = '<form><input name="test"><button>Submit</button></form>'
+        html = wrap_html_fragment(html)
+
+        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=5)
+        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
+        server.html = html_with_csrf
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            url_file = f.name
+
+        try:
+            def run_server():
+                server.serve(url_file=url_file)
+
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
+
+            # Wait for server to start and write URL file
+            time.sleep(0.5)
+
+            # Verify URL file was written
+            assert os.path.exists(url_file), "URL file should exist"
+
+            with open(url_file, 'r') as f:
+                url_content = f.read().strip()
+
+            assert url_content.startswith('http://127.0.0.1:'), \
+                f"URL should start with http://127.0.0.1:, got {url_content}"
+            assert '/readform_' in url_content, \
+                f"URL should contain /readform_, got {url_content}"
+
+            # Clean up - trigger shutdown
+            server.shutdown_event.set()
+            server_thread.join(timeout=2)
+
+        finally:
+            if os.path.exists(url_file):
+                os.unlink(url_file)
+
+    def test_url_file_contains_correct_url(self):
+        """Test that URL file contains the same URL as get_url()."""
+        html = '<form><input name="test"><button>Submit</button></form>'
+        html = wrap_html_fragment(html)
+
+        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=5)
+        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
+        server.html = html_with_csrf
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            url_file = f.name
+
+        try:
+            result = {'url': None}
+
+            def run_server():
+                server.serve(url_file=url_file)
+
+            server_thread = threading.Thread(target=run_server, daemon=True)
+            server_thread.start()
+
+            # Wait for server to start
+            time.sleep(0.5)
+
+            # Get URL via API
+            api_url = server.get_url()
+
+            # Read URL from file
+            with open(url_file, 'r') as f:
+                file_url = f.read().strip()
+
+            assert file_url == api_url, \
+                f"URL in file ({file_url}) should match get_url() ({api_url})"
+
+            # Clean up
+            server.shutdown_event.set()
+            server_thread.join(timeout=2)
+
+        finally:
+            if os.path.exists(url_file):
+                os.unlink(url_file)
+
+
 class TestCancelButton:
     """Test cancel button functionality."""
 

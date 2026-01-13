@@ -102,7 +102,8 @@ def run_readwebform(args) -> int:
         # Step 9: Start server and wait for submission
         # Browser is launched after server is ready (inside serve() method)
         success, form_data, file_metadata, cancelled = server.serve(
-            launch_browser_path=browser_path
+            launch_browser_path=browser_path,
+            url_file=getattr(args, 'url_file', None)
         )
 
         if cancelled:

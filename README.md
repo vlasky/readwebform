@@ -1,6 +1,6 @@
 # readwebform
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -150,6 +150,7 @@ cat form.html | readwebform
 | `--json` | Output result as JSON (default) |
 | `--envfile <path>` | Write sanitized `export` statements to file |
 | `--print-env` | Print sanitized environment variable exports to stdout |
+| `--url-file <path>` | Write the form URL to this file |
 | `--launch-browser [path]` | Launch default browser, or specify browser path |
 | `--no-submit-button` | Disable automatic submit button in declarative mode |
 | `--no-cancel-button` | Disable cancel button in declarative mode |
@@ -223,7 +224,7 @@ On cancellation (user clicks Cancel button):
 ### Environment Variables
 
 ```bash
-readwebform --print-env --field name:text:Name
+readwebform --print-env --field name:text:Name --field email:email:Email
 ```
 
 Output:
@@ -252,7 +253,7 @@ Uploaded files are stored in a temporary directory (e.g., `/tmp/readwebform_XXXX
 | 7 | User cancelled the form |
 | 8 | Invalid argument |
 
-Exit code 0 guarantees valid JSON output on stdout.
+Exit code 0 with default output mode (`--json`) guarantees valid JSON on stdout.
 
 ## HTTPS Support
 
@@ -309,18 +310,15 @@ Use [Certbot](https://certbot.eff.org/) to obtain free trusted certificates for 
 
 ## Security
 
-`readwebform` is designed for local or trusted-network use. It is **not intended** to be exposed to the public internet as a long-running service.
+The server automatically shuts down after a single form submission.
 
 **Security features:**
 
 - Defaults to `127.0.0.1` (localhost only)
+- HTTPS support
 - CSRF token protection for each session
-- Served forms contain no external resource fetches or dynamic code execution
-- All outputs sanitized and safely encoded
+- User-provided HTML is served as-is; generated forms (`--field`) contain no external resources or scripts
 - Stateless and ephemeral by design
-- Optional HTTPS for encrypted remote access
-
-**Important:** Only one submission is accepted per invocation. Subsequent requests are rejected after the form is submitted.
 
 ## Python API
 
@@ -341,8 +339,10 @@ result = read_webform(
 if result.success:
     email = result.fields['email']
     print(f"User entered: {email}")
+elif result.error == 'cancelled':
+    print("User cancelled the form")
 else:
-    print("Timeout or user cancelled")
+    print(f"Form failed: {result.error}")  # e.g., 'timeout'
 ```
 
 **What happens:**
@@ -448,9 +448,10 @@ Each field is a dict:
 
 ```python
 class FormResult:
-    success: bool                           # True if form submitted, False if timeout
-    fields: Optional[Dict[str, str]]        # Field name -> value (None if timeout)
+    success: bool                           # True if form submitted, False if timeout/cancel
+    fields: Optional[Dict[str, str]]        # Field name -> value (None if not success)
     files: Optional[Dict[str, Dict]]        # File field -> {'filename': ..., 'path': ...}
+    error: Optional[str]                    # 'timeout', 'cancelled', or other error
 ```
 
 ## Examples
@@ -487,6 +488,7 @@ echo "User entered: $WEBFORM_NAME"
 
 ```bash
 #!/bin/bash
+# Requires jq for JSON parsing: https://jqlang.github.io/jq/
 result=$(readwebform --field name:text:Name:required --field age:number:Age)
 name=$(echo "$result" | jq -r '.fields.name')
 age=$(echo "$result" | jq -r '.fields.age')
@@ -548,8 +550,8 @@ except TimeoutError as e:
 ## Development
 
 ```bash
-# Install in development mode
-pip install -e .
+# Install in development mode with test dependencies
+pip install -e ".[test]"
 
 # Run all tests
 python -m pytest tests/ -v
@@ -591,5 +593,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Author
 
 **Vlad Lasky** - [https://github.com/vlasky](https://github.com/vlasky)
-
-Created for script automation and interactive data collection.

@@ -126,6 +126,11 @@ class ReadWebFormArgumentParser:
             action='store_true',
             help='Print sanitized environment variable exports to stdout'
         )
+        output_group.add_argument(
+            '--url-file',
+            metavar='<path>',
+            help='Write the form URL to this file'
+        )
 
         # Browser launch
         browser_group = self.parser.add_argument_group('browser options')

@@ -95,6 +95,11 @@ readwebform [options]
 | `--print-env` | Print sanitized environment variable exports to stdout. |
 | `--launch-browser [path]` | Launch a web browser to open the form. If no path is provided, uses the system default browser. |
 | `--no-submit-button` | Disable automatic submit button in declarative mode. |
+| `--no-cancel-button` | Disable cancel button in declarative mode. |
+| `--cancel-label <text>` | Label for the cancel button (default: "Cancel"). |
+| `--url-file <path>` | Write the form URL to this file. |
+| `--cert <path>` | SSL certificate file (PEM) for HTTPS. |
+| `--key <path>` | SSL private key file (PEM) for HTTPS. |
 
 * * *
 
@@ -332,6 +337,8 @@ export WEBFORM_EMAIL='alice@example.com'
 | 4 | Browser launch failure |
 | 5 | Timeout waiting for submission |
 | 6 | Upload size exceeded |
+| 7 | User cancelled the form |
+| 8 | Invalid argument |
 
 * * *
 
@@ -341,11 +348,9 @@ export WEBFORM_EMAIL='alice@example.com'
     
 -   Rejects external requests unless `--host` explicitly allows them.
     
--   No remote fetches or includes.
-    
+-   User-provided HTML is served as-is; generated forms (`--field`) contain no external resources or scripts.
+
 -   No dynamic code execution or template evaluation.
-    
--   All outputs sanitized and safely encoded.
     
 -   Stateless and ephemeral by design.
     

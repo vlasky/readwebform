@@ -399,13 +399,15 @@ class FormServer:
         self.cancelled = True
         self.shutdown_event.set()  # Signal shutdown to main thread
 
-    def serve(self, launch_browser_path: Optional[str] = None) -> Tuple[bool, Optional[FormData], dict, bool]:
+    def serve(self, launch_browser_path: Optional[str] = None,
+              url_file: Optional[str] = None) -> Tuple[bool, Optional[FormData], dict, bool]:
         """
         Start server and wait for submission or timeout.
 
         Args:
             launch_browser_path: If not None, launch browser after server is ready.
                                  Empty string means system default, path means custom browser.
+            url_file: If provided, write the form URL to this file.
 
         Returns:
             Tuple of (success, form_data, file_metadata, cancelled)
@@ -476,6 +478,11 @@ class FormServer:
         # Print URL to stderr
         print(f'\nOpen this URL in your browser:', file=sys.stderr)
         print(f'  {url}\n', file=sys.stderr)
+
+        # Write URL to file if requested
+        if url_file:
+            with open(url_file, 'w', encoding='utf-8') as f:
+                f.write(url + '\n')
 
         # Launch browser AFTER server is bound and ready (fixes race condition)
         if launch_browser_path is not None:

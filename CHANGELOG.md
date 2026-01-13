@@ -1,10 +1,5 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
 ## [0.2.0] - 2025-01-13
 
 ### Added
@@ -17,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Exit code 7 for cancelled forms
 - Python API: `add_cancel_button` and `cancel_label` parameters for `read_webform_fields()`
 - Custom HTML forms can add cancel button with `<button type="submit" name="_cancel" value="1">Cancel</button>`
+- `--url-file <path>` option to write the form URL to a file for scripting
 
 ### Changed
 
@@ -36,6 +32,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python API (`read_webform`, `read_webform_fields`)
 - Cross-platform browser launching
 - Comprehensive test suite (150 tests)
-
-[0.2.0]: https://github.com/vlasky/readwebform/releases/tag/v0.2.0
-[0.1.0]: https://github.com/vlasky/readwebform/releases/tag/v0.1.0
