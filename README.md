@@ -152,6 +152,8 @@ cat form.html | readwebform
 | `--print-env` | Print sanitized environment variable exports to stdout |
 | `--launch-browser [path]` | Launch default browser, or specify browser path |
 | `--no-submit-button` | Disable automatic submit button in declarative mode |
+| `--no-cancel-button` | Disable cancel button in declarative mode |
+| `--cancel-label <text>` | Label for the cancel button (default: "Cancel") |
 
 ### Declarative Field Syntax
 
@@ -206,7 +208,17 @@ On timeout:
 }
 ```
 
-> **Note:** Timeout is a normal outcome, not an exception. `success: false` does not necessarily indicate an error condition.
+On cancellation (user clicks Cancel button):
+```json
+{
+  "success": false,
+  "fields": {},
+  "files": {},
+  "error": "cancelled"
+}
+```
+
+> **Note:** Timeout and cancellation are normal outcomes, not exceptions. `success: false` does not necessarily indicate an error condition.
 
 ### Environment Variables
 
@@ -237,6 +249,8 @@ Uploaded files are stored in a temporary directory (e.g., `/tmp/readwebform_XXXX
 | 4 | Browser launch failure |
 | 5 | Timeout waiting for submission |
 | 6 | Upload size exceeded |
+| 7 | User cancelled the form |
+| 8 | Invalid argument |
 
 Exit code 0 guarantees valid JSON output on stdout.
 

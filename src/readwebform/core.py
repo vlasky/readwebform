@@ -22,7 +22,8 @@ EXIT_READ_ERROR = 3
 EXIT_BROWSER_LAUNCH_ERROR = 4
 EXIT_TIMEOUT = 5
 EXIT_UPLOAD_SIZE_EXCEEDED = 6
-EXIT_INVALID_ARGUMENT = 7
+EXIT_CANCELLED = 7
+EXIT_INVALID_ARGUMENT = 8
 
 
 def run_readwebform(args) -> int:
@@ -100,9 +101,17 @@ def run_readwebform(args) -> int:
 
         # Step 9: Start server and wait for submission
         # Browser is launched after server is ready (inside serve() method)
-        success, form_data, file_metadata = server.serve(
+        success, form_data, file_metadata, cancelled = server.serve(
             launch_browser_path=browser_path
         )
+
+        if cancelled:
+            # Output JSON with error on cancellation (unless using env output)
+            if not args.print_env:
+                json_output = format_json_output({}, {}, success=False, error='cancelled')
+                print(json_output)
+            print('Form submission cancelled by user', file=sys.stderr)
+            return EXIT_CANCELLED
 
         if not success:
             # Output JSON with error on timeout (unless using env output)
@@ -162,7 +171,12 @@ def load_html(args) -> Optional[str]:
 
         # Priority 3: --field (declarative)
         if args.field:
-            return generate_html_from_fields(args.field, args.no_submit_button)
+            return generate_html_from_fields(
+                args.field,
+                args.no_submit_button,
+                getattr(args, 'no_cancel_button', False),
+                getattr(args, 'cancel_label', 'Cancel')
+            )
 
         # Priority 4: stdin
         return read_stdin()
@@ -178,13 +192,17 @@ def load_html(args) -> Optional[str]:
         return None
 
 
-def generate_html_from_fields(field_specs: list, no_submit_button: bool) -> str:
+def generate_html_from_fields(field_specs: list, no_submit_button: bool,
+                               no_cancel_button: bool = False,
+                               cancel_label: str = 'Cancel') -> str:
     """
     Generate HTML from declarative field specifications.
 
     Args:
         field_specs: List of field specification strings
         no_submit_button: Whether to omit submit button
+        no_cancel_button: Whether to omit cancel button
+        cancel_label: Label for the cancel button
 
     Returns:
         Generated HTML
@@ -199,7 +217,9 @@ def generate_html_from_fields(field_specs: list, no_submit_button: bool) -> str:
             sys.exit(EXIT_INVALID_HTML)
 
     add_submit = not no_submit_button
-    return generate_form_html(fields, add_submit_button=add_submit)
+    add_cancel = not no_cancel_button
+    return generate_form_html(fields, add_submit_button=add_submit,
+                              add_cancel_button=add_cancel, cancel_label=cancel_label)
 
 
 def read_stdin() -> str:

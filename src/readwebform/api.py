@@ -198,13 +198,17 @@ def read_webform(
         if launch_browser:
             # Empty string for browser_path means system default
             launch_path = browser_path if browser_path else ''
-            success, form_data, file_metadata = server.serve(launch_browser_path=launch_path)
+            success, form_data, file_metadata, cancelled = server.serve(launch_browser_path=launch_path)
         else:
-            success, form_data, file_metadata = server.serve()
+            success, form_data, file_metadata, cancelled = server.serve()
     except OSError as e:
         return FormResult(success=False, error=f'bind_error: {e}')
     except Exception as e:
         return FormResult(success=False, error=f'server_error: {e}')
+
+    # Handle cancellation
+    if cancelled:
+        return FormResult(success=False, error='cancelled')
 
     # Convert to result object
     if success:
@@ -236,6 +240,8 @@ def read_webform_fields(
     timeout: int = 300,
     launch_browser: bool = False,
     browser_path: Optional[str] = None,
+    add_cancel_button: bool = True,
+    cancel_label: str = 'Cancel',
     **kwargs
 ) -> FormResult:
     """
@@ -250,6 +256,8 @@ def read_webform_fields(
         timeout: Maximum seconds to wait (default: 300)
         launch_browser: Whether to open browser (default: False)
         browser_path: Path to specific browser (optional)
+        add_cancel_button: Whether to add cancel button (default: True)
+        cancel_label: Label for the cancel button (default: 'Cancel')
         **kwargs: Additional arguments passed to read_webform()
 
     Returns:
@@ -280,7 +288,9 @@ def read_webform_fields(
         field_dicts,
         title=title,
         text=text,
-        add_submit=True
+        add_submit=True,
+        add_cancel=add_cancel_button,
+        cancel_label=cancel_label
     )
 
     # Use read_webform

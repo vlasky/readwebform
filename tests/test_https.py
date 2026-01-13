@@ -178,7 +178,7 @@ class TestHTTPSServer:
         result = {'success': False, 'data': None}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -239,7 +239,7 @@ class TestHTTPSServer:
         result = {'success': False, 'data': None, 'files': None}
 
         def run_server():
-            success, form_data, file_metadata = server.serve()
+            success, form_data, file_metadata, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -317,9 +317,9 @@ class TestHTTPSServer:
         html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
         server.html = html_with_csrf
 
-        start_time = time.time()
-        success, form_data, file_metadata = server.serve()
-        elapsed = time.time() - start_time
+        start_time = time.monotonic()
+        success, form_data, file_metadata, _ = server.serve()
+        elapsed = time.monotonic() - start_time
 
         assert success is False
         assert form_data is None
@@ -477,9 +477,9 @@ class TestHTTPSKeepAlive:
         result = {'timed_out': False, 'elapsed': None}
 
         def run_server():
-            start = time.time()
-            success, _, _ = server.serve()
-            result['elapsed'] = time.time() - start
+            start = time.monotonic()
+            success, _, _, _ = server.serve()
+            result['elapsed'] = time.monotonic() - start
             result['timed_out'] = not success
 
         server_thread = threading.Thread(target=run_server, daemon=True)

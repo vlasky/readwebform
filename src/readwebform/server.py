@@ -32,6 +32,7 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
     max_file_size: Optional[int] = None
     max_total_size: Optional[int] = None
     on_success: Optional[Callable] = None
+    on_cancel: Optional[Callable] = None
     form_data: Optional[FormData] = None
     upload_dir: str = ''
     reset_timeout_callback: Optional[Callable] = None
@@ -128,6 +129,27 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         # Remove CSRF token from fields
         form_data.fields.pop('_csrf_token', None)
 
+        # Check for cancellation
+        if '_cancel' in form_data.fields:
+            form_data.fields.pop('_cancel', None)
+            self._send_cancelled_page()
+
+            if self.on_cancel:
+                self.on_cancel()
+
+            # Schedule shutdown
+            def delayed_shutdown():
+                time.sleep(0.05)
+                if hasattr(self, 'server_instance') and self.server_instance:
+                    try:
+                        self.server_instance.shutdown()
+                    except:
+                        pass
+
+            shutdown_thread = threading.Thread(target=delayed_shutdown, daemon=True)
+            shutdown_thread.start()
+            return
+
         # Save uploaded files
         file_metadata = {}
         for name, uploaded_file in form_data.files.items():
@@ -198,6 +220,38 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.end_headers()
         self.wfile.write(success_html.encode('utf-8'))
+
+    def _send_cancelled_page(self):
+        """Send cancellation confirmation page."""
+        cancelled_html = '''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Cancelled</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 600px;
+            margin: 100px auto;
+            padding: 20px;
+            text-align: center;
+        }
+        .cancelled {
+            color: #6c757d;
+            font-size: 24px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="cancelled">Form submission cancelled</div>
+    <p>You may now close this window.</p>
+</body>
+</html>'''
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(cancelled_html.encode('utf-8'))
 
     def _send_error_page(self, code: int, title: str, message: str):
         """Send error page to user."""
@@ -295,6 +349,7 @@ class FormServer:
         self.form_data: Optional[FormData] = None
         self.file_metadata: dict = {}
         self.success = False
+        self.cancelled = False
         self.timed_out = False
         self.shutdown_event = threading.Event()  # Thread-safe shutdown signaling
         self.timeout_timer: Optional[threading.Timer] = None
@@ -335,7 +390,16 @@ class FormServer:
         self.success = True
         self.shutdown_event.set()  # Signal shutdown to main thread
 
-    def serve(self, launch_browser_path: Optional[str] = None) -> Tuple[bool, Optional[FormData], dict]:
+    def _on_cancel(self):
+        """Callback when form is cancelled."""
+        # Cancel timeout timer
+        if self.timeout_timer:
+            self.timeout_timer.cancel()
+
+        self.cancelled = True
+        self.shutdown_event.set()  # Signal shutdown to main thread
+
+    def serve(self, launch_browser_path: Optional[str] = None) -> Tuple[bool, Optional[FormData], dict, bool]:
         """
         Start server and wait for submission or timeout.
 
@@ -344,7 +408,7 @@ class FormServer:
                                  Empty string means system default, path means custom browser.
 
         Returns:
-            Tuple of (success, form_data, file_metadata)
+            Tuple of (success, form_data, file_metadata, cancelled)
 
         Raises:
             OSError: If the port is already in use or binding fails
@@ -401,6 +465,7 @@ class FormServer:
         FormServerHandler.max_file_size = self.max_file_size
         FormServerHandler.max_total_size = self.max_total_size
         FormServerHandler.on_success = self._on_success
+        FormServerHandler.on_cancel = self._on_cancel
         FormServerHandler.upload_dir = self.upload_dir
         FormServerHandler.server_instance = self.server
         if self.reset_timeout_on_error:
@@ -442,9 +507,11 @@ class FormServer:
 
         # Return results based on what happened
         if self.timed_out:
-            return False, None, {}
+            return False, None, {}, False
+        elif self.cancelled:
+            return False, None, {}, True
         else:
-            return self.success, self.form_data, self.file_metadata
+            return self.success, self.form_data, self.file_metadata, False
 
     def _run_server(self):
         """Run server in thread."""

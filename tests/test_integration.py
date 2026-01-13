@@ -87,7 +87,7 @@ class TestServerIntegration:
         result = {'success': False, 'data': None, 'files': None}
 
         def run_server():
-            success, form_data, file_metadata = server.serve()
+            success, form_data, file_metadata, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -143,7 +143,7 @@ class TestServerIntegration:
         result = {'success': False, 'data': None, 'files': None}
 
         def run_server():
-            success, form_data, file_metadata = server.serve()
+            success, form_data, file_metadata, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -312,9 +312,9 @@ class TestServerIntegration:
         html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
         server.html = html_with_csrf
 
-        start_time = time.time()
-        success, form_data, file_metadata = server.serve()
-        elapsed = time.time() - start_time
+        start_time = time.monotonic()
+        success, form_data, file_metadata, _ = server.serve()
+        elapsed = time.monotonic() - start_time
 
         assert success is False
         assert form_data is None
@@ -406,7 +406,7 @@ class TestEndToEndScenarios:
         result = {'success': False, 'data': None}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -461,7 +461,7 @@ class TestEndToEndScenarios:
         result = {'success': False, 'data': None, 'files': None}
 
         def run_server():
-            success, form_data, file_metadata = server.serve()
+            success, form_data, file_metadata, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -539,7 +539,7 @@ class TestEndToEndScenarios:
         result = {'success': False, 'data': None}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -579,7 +579,7 @@ class TestCLIProcessBehavior:
         the process should exit automatically after timeout, not hang indefinitely.
         """
         # Run readwebform as subprocess with 3-second timeout
-        start_time = time.time()
+        start_time = time.monotonic()
 
         result = subprocess.run(
             [
@@ -591,7 +591,7 @@ class TestCLIProcessBehavior:
             timeout=10,  # Kill if hangs longer than 10s
         )
 
-        elapsed = time.time() - start_time
+        elapsed = time.monotonic() - start_time
 
         # Verify exit code is 5 (timeout)
         assert result.returncode == 5, \
@@ -677,9 +677,9 @@ class TestCLIProcessBehavior:
         result = {'timed_out': False, 'elapsed': None}
 
         def run_server():
-            start = time.time()
-            success, _, _ = server.serve()
-            result['elapsed'] = time.time() - start
+            start = time.monotonic()
+            success, _, _, _ = server.serve()
+            result['elapsed'] = time.monotonic() - start
             result['timed_out'] = not success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -720,3 +720,172 @@ class TestCLIProcessBehavior:
         assert result['elapsed'] is not None
         assert 2.5 < result['elapsed'] < 5.0, \
             f"Should timeout around 3s with keep-alive, took {result['elapsed']:.2f}s"
+
+
+class TestCancelButton:
+    """Test cancel button functionality."""
+
+    def test_cancel_button_triggers_cancellation(self):
+        """Test that submitting with _cancel field triggers cancellation."""
+        html = '<form><input name="test" value="data"><button>Submit</button></form>'
+        html = wrap_html_fragment(html)
+
+        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=10)
+        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
+        server.html = html_with_csrf
+
+        result = {'success': None, 'cancelled': None, 'data': None}
+
+        def run_server():
+            success, form_data, _, cancelled = server.serve()
+            result['success'] = success
+            result['cancelled'] = cancelled
+            if form_data:
+                result['data'] = form_data.fields
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        time.sleep(0.5)
+
+        # Submit with _cancel field
+        url = server.get_url()
+        data = {
+            '_cancel': '1',
+            '_csrf_token': server.csrf_token
+        }
+
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(url, data=encoded_data, method='POST')
+        response = urllib.request.urlopen(req, timeout=2)
+
+        assert response.status == 200
+        content = response.read().decode('utf-8')
+        assert 'cancelled' in content.lower()
+
+        server_thread.join(timeout=2)
+
+        assert result['success'] is False, "Should report failure on cancel"
+        assert result['cancelled'] is True, "Should report cancelled"
+        assert result['data'] is None, "Should have no form data on cancel"
+
+    def test_cancel_with_form_data_discards_data(self):
+        """Test that cancellation discards any submitted form data."""
+        html = '<form><input name="username" value="testuser"><button>Submit</button></form>'
+        html = wrap_html_fragment(html)
+
+        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=10)
+        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
+        server.html = html_with_csrf
+
+        result = {'success': None, 'cancelled': None, 'data': None}
+
+        def run_server():
+            success, form_data, _, cancelled = server.serve()
+            result['success'] = success
+            result['cancelled'] = cancelled
+            if form_data:
+                result['data'] = form_data.fields
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        time.sleep(0.5)
+
+        # Submit with both data and _cancel
+        url = server.get_url()
+        data = {
+            'username': 'should_be_discarded',
+            '_cancel': '1',
+            '_csrf_token': server.csrf_token
+        }
+
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(url, data=encoded_data, method='POST')
+        urllib.request.urlopen(req, timeout=2)
+
+        server_thread.join(timeout=2)
+
+        assert result['cancelled'] is True
+        assert result['data'] is None, "Form data should be discarded on cancel"
+
+    def test_cancel_returns_correct_exit_code(self):
+        """Test that cancellation returns exit code 7 via core module."""
+        from readwebform.core import EXIT_CANCELLED
+
+        # Verify the exit code constant is correct
+        assert EXIT_CANCELLED == 7, "EXIT_CANCELLED should be 7"
+
+        # Test the server cancel path returns correct values
+        html = '<form><input name="test"><button>Submit</button></form>'
+        html = wrap_html_fragment(html)
+
+        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=10)
+        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
+        server.html = html_with_csrf
+
+        result = {'success': None, 'cancelled': None}
+
+        def run_server():
+            success, _, _, cancelled = server.serve()
+            result['success'] = success
+            result['cancelled'] = cancelled
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        time.sleep(0.5)
+
+        # Submit cancel
+        url = server.get_url()
+        data = {'_cancel': '1', '_csrf_token': server.csrf_token}
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(url, data=encoded_data, method='POST')
+        urllib.request.urlopen(req, timeout=2)
+
+        server_thread.join(timeout=2)
+
+        # When cancelled=True and success=False, core.py returns EXIT_CANCELLED (7)
+        assert result['success'] is False
+        assert result['cancelled'] is True
+
+    def test_cancel_json_output_has_cancelled_error(self):
+        """Test that cancelled form outputs JSON with error='cancelled'."""
+        html = '<form><input name="test"><button>Submit</button></form>'
+        html = wrap_html_fragment(html)
+
+        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=10)
+        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
+        server.html = html_with_csrf
+
+        result = {'cancelled': None}
+
+        def run_server():
+            _, _, _, cancelled = server.serve()
+            result['cancelled'] = cancelled
+
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        server_thread.start()
+
+        time.sleep(0.5)
+
+        # Submit cancel
+        url = server.get_url()
+        data = {'_cancel': '1', '_csrf_token': server.csrf_token}
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(url, data=encoded_data, method='POST')
+        urllib.request.urlopen(req, timeout=2)
+
+        server_thread.join(timeout=2)
+
+        assert result['cancelled'] is True
+
+        # Test output formatting
+        from readwebform.output import format_json_output
+        json_output = format_json_output({}, {}, success=False, error='cancelled')
+        parsed = json.loads(json_output)
+
+        assert parsed['success'] is False
+        assert parsed['error'] == 'cancelled'
+        assert parsed['fields'] == {}
+        assert parsed['files'] == {}

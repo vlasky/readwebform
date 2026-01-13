@@ -75,13 +75,16 @@ class FieldSpec:
         return options
 
 
-def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True) -> str:
+def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True,
+                       add_cancel_button: bool = True, cancel_label: str = 'Cancel') -> str:
     """
     Generate HTML form from field specifications.
 
     Args:
         fields: List of FieldSpec instances
         add_submit_button: Whether to add a submit button
+        add_cancel_button: Whether to add a cancel button
+        cancel_label: Label text for the cancel button
 
     Returns:
         HTML form string
@@ -97,6 +100,9 @@ def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True) 
 
     if add_submit_button:
         form_parts.append('    <button type="submit">Submit</button>')
+
+    if add_cancel_button:
+        form_parts.append(f'    <button type="submit" name="_cancel" value="1" class="cancel" formnovalidate>{escape_html(cancel_label)}</button>')
 
     form_parts.append('</form>')
 
@@ -302,7 +308,9 @@ def generate_form_html_from_dicts(
     fields: List[Dict],
     title: Optional[str] = None,
     text: Optional[str] = None,
-    add_submit: bool = True
+    add_submit: bool = True,
+    add_cancel: bool = True,
+    cancel_label: str = 'Cancel'
 ) -> str:
     """
     Generate complete HTML document from field dictionaries.
@@ -314,6 +322,8 @@ def generate_form_html_from_dicts(
         title: Page title
         text: Instructional text above form
         add_submit: Whether to add submit button
+        add_cancel: Whether to add cancel button
+        cancel_label: Label text for the cancel button
 
     Returns:
         Complete HTML document string
@@ -322,7 +332,8 @@ def generate_form_html_from_dicts(
     field_specs = [dict_to_fieldspec(f) for f in fields]
 
     # Generate form HTML
-    form_html = generate_form_html(field_specs, add_submit_button=add_submit)
+    form_html = generate_form_html(field_specs, add_submit_button=add_submit,
+                                   add_cancel_button=add_cancel, cancel_label=cancel_label)
 
     # Wrap in complete HTML document
     title_html = f'<h1>{escape_html(title)}</h1>' if title else ''
@@ -365,9 +376,16 @@ def generate_form_html_from_dicts(
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            margin-right: 10px;
         }}
         button:hover {{
             background: #0056b3;
+        }}
+        button.cancel {{
+            background: #6c757d;
+        }}
+        button.cancel:hover {{
+            background: #5a6268;
         }}
     </style>
 </head>

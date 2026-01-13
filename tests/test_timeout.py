@@ -27,9 +27,9 @@ class TestTimeoutBehavior:
         html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
         server.html = html_with_csrf
 
-        start_time = time.time()
-        success, form_data, file_metadata = server.serve()
-        elapsed = time.time() - start_time
+        start_time = time.monotonic()
+        success, form_data, file_metadata, _ = server.serve()
+        elapsed = time.monotonic() - start_time
 
         # Verify timeout occurred
         assert success is False, "Should report failure on timeout"
@@ -50,9 +50,9 @@ class TestTimeoutBehavior:
             html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
             server.html = html_with_csrf
 
-            start_time = time.time()
-            success, form_data, _ = server.serve()
-            elapsed = time.time() - start_time
+            start_time = time.monotonic()
+            success, form_data, _, _ = server.serve()
+            elapsed = time.monotonic() - start_time
 
             assert success is False, f"Iteration {iteration}: Should timeout"
             assert form_data is None, f"Iteration {iteration}: Should have no data"
@@ -76,7 +76,7 @@ class TestTimeoutBehavior:
         result = {'timeout_occurred': False}
 
         def run_server():
-            success, _, _ = server.serve()
+            success, _, _, _ = server.serve()
             result['timeout_occurred'] = not success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -141,9 +141,9 @@ class TestTimeoutBehavior:
         result = {'timeout_occurred': False, 'elapsed': None}
 
         def run_server():
-            start = time.time()
-            success, _, _ = server.serve()
-            result['elapsed'] = time.time() - start
+            start = time.monotonic()
+            success, _, _, _ = server.serve()
+            result['elapsed'] = time.monotonic() - start
             result['timeout_occurred'] = not success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -191,9 +191,9 @@ class TestTimeoutBehavior:
         result = {'success': False, 'elapsed': None}
 
         def run_server():
-            start = time.time()
-            success, form_data, _ = server.serve()
-            result['elapsed'] = time.time() - start
+            start = time.monotonic()
+            success, form_data, _, _ = server.serve()
+            result['elapsed'] = time.monotonic() - start
             result['success'] = success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -231,9 +231,9 @@ class TestTimeoutBehavior:
         html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
         server.html = html_with_csrf
 
-        start_time = time.time()
-        success, form_data, _ = server.serve()
-        elapsed = time.time() - start_time
+        start_time = time.monotonic()
+        success, form_data, _, _ = server.serve()
+        elapsed = time.monotonic() - start_time
 
         assert success is False, "Should timeout"
         assert form_data is None
@@ -255,7 +255,7 @@ class TestTimeoutBehavior:
         result = {'timeout_occurred': False}
 
         def run_server():
-            success, _, _ = server.serve()
+            success, _, _, _ = server.serve()
             result['timeout_occurred'] = not success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -296,9 +296,9 @@ class TestTimeoutBehavior:
             html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
             server.html = html_with_csrf
 
-            start_time = time.time()
-            success, _, _ = server.serve()
-            elapsed = time.time() - start_time
+            start_time = time.monotonic()
+            success, _, _, _ = server.serve()
+            elapsed = time.monotonic() - start_time
 
             assert success is False, f"Timeout {timeout_value}s: Should timeout"
             expected_min = timeout_value - 0.2
@@ -322,7 +322,7 @@ class TestTimeoutEdgeCases:
         result = {'timeout_occurred': False}
 
         def run_server():
-            success, _, _ = server.serve()
+            success, _, _, _ = server.serve()
             result['timeout_occurred'] = not success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -355,7 +355,7 @@ class TestTimeoutEdgeCases:
         result = {'success': False}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
 
         server_thread = threading.Thread(target=run_server, daemon=True)

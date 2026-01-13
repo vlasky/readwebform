@@ -144,6 +144,17 @@ class ReadWebFormArgumentParser:
             action='store_true',
             help='Disable automatic submit button in declarative mode'
         )
+        form_group.add_argument(
+            '--no-cancel-button',
+            action='store_true',
+            help='Disable cancel button in declarative mode'
+        )
+        form_group.add_argument(
+            '--cancel-label',
+            metavar='<text>',
+            default='Cancel',
+            help='Label for cancel button (default: Cancel)'
+        )
 
     @staticmethod
     def _str_to_bool(value: str) -> bool:

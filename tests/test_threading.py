@@ -35,7 +35,7 @@ class TestThreadingSynchronization:
         result = {'success': False, 'data': None}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -78,7 +78,7 @@ class TestThreadingSynchronization:
         result = {}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
             result['event_set'] = server.shutdown_event.is_set()
 
@@ -129,7 +129,7 @@ class TestThreadingSynchronization:
             result = {'success': False, 'iteration': None}
 
             def run_server():
-                success, form_data, _ = server.serve()
+                success, form_data, _, _ = server.serve()
                 result['success'] = success
                 if form_data:
                     result['iteration'] = form_data.fields.get('iteration')
@@ -181,7 +181,7 @@ class TestThreadingSynchronization:
         result = {'success': False, 'form_data': None}
 
         def run_server():
-            success, form_data, file_metadata = server.serve()
+            success, form_data, file_metadata, _ = server.serve()
             result['success'] = success
             result['form_data'] = form_data
             # Main thread should see the data
@@ -235,7 +235,7 @@ class TestThreadingSynchronization:
         result = {'success': False, 'data': None}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             result['success'] = success
             if form_data:
                 result['data'] = form_data.fields
@@ -292,7 +292,7 @@ class TestThreadingSynchronization:
         server.html = html_with_csrf
 
         # Don't submit - let it timeout
-        success, form_data, file_metadata = server.serve()
+        success, form_data, file_metadata, _ = server.serve()
 
         # After timeout, shutdown_event should NOT be set (timeout is different from success)
         assert success is False, "Timeout should report failure"
@@ -316,7 +316,7 @@ class TestThreadingSynchronization:
             result = {'success': False}
 
             def run_server():
-                success, _, _ = server.serve()
+                success, _, _, _ = server.serve()
                 result['success'] = success
 
             server_thread = threading.Thread(target=run_server, daemon=True)
@@ -401,7 +401,7 @@ class TestThreadingEdgeCases:
         result = {'data': None}
 
         def run_server():
-            success, form_data, _ = server.serve()
+            success, form_data, _, _ = server.serve()
             if success:
                 result['data'] = form_data.fields
 
@@ -451,9 +451,9 @@ class TestThreadingEdgeCases:
         result = {'success': False, 'exit_time': None}
 
         def run_server():
-            start = time.time()
-            success, form_data, _ = server.serve()
-            result['exit_time'] = time.time() - start
+            start = time.monotonic()
+            success, form_data, _, _ = server.serve()
+            result['exit_time'] = time.monotonic() - start
             result['success'] = success
 
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -471,7 +471,7 @@ class TestThreadingEdgeCases:
             '_csrf_token': server.csrf_token
         }).encode('utf-8')
 
-        submission_time = time.time()
+        submission_time = time.monotonic()
         req = urllib.request.Request(url, data=data, method='POST')
         response = urllib.request.urlopen(req, timeout=2)
         assert response.status == 200
