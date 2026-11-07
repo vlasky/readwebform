@@ -118,8 +118,10 @@ class FormResult:
 
     Attributes:
         success: True if form was submitted successfully, False on timeout/error
-        fields: Dictionary of field name -> value (None if not success)
-        files: Dictionary of file field name -> UploadedFile (None if no files)
+        fields: Dictionary of field name -> value. Repeated fields (checkbox
+            groups, multi-selects) are lists of strings. None if not success.
+        files: Dictionary of file field name -> UploadedFile, or a list of
+            UploadedFile for ``<input type="file" multiple>``. None if no files.
         error: Error description if success is False (e.g., 'timeout', 'cancelled')
 
     Example:
@@ -130,8 +132,8 @@ class FormResult:
             print(f"Form failed: {result.error}")
     """
     success: bool
-    fields: Optional[Dict[str, str]] = None
-    files: Optional[Dict[str, UploadedFile]] = None
+    fields: Optional[Dict[str, Union[str, List[str]]]] = None
+    files: Optional[Dict[str, Union[UploadedFile, List[UploadedFile]]]] = None
     error: Optional[str] = None
 
 
@@ -213,15 +215,12 @@ def read_webform(
     # Convert to result object
     if success:
         # Convert file metadata dicts to UploadedFile objects
-        uploaded_files = {}
-        if file_metadata:
-            for name, meta in file_metadata.items():
-                uploaded_files[name] = UploadedFile(
-                    filename=meta['filename'],
-                    path=meta['path'],
-                    size=meta['size'],
-                    content_type=meta['content_type']
-                )
+        uploaded_files: Dict[str, Union[UploadedFile, List[UploadedFile]]] = {}
+        for name, meta in (file_metadata or {}).items():
+            if isinstance(meta, list):
+                uploaded_files[name] = [UploadedFile(**m) for m in meta]
+            else:
+                uploaded_files[name] = UploadedFile(**meta)
 
         return FormResult(
             success=True,

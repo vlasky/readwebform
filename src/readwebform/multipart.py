@@ -1,18 +1,26 @@
 """
 Multipart form data parser for readwebform.
 
-Implements RFC 2388 (multipart/form-data) parsing without using deprecated cgi.FieldStorage.
+Implements RFC 7578 (multipart/form-data) parsing without using the deprecated
+cgi.FieldStorage module.
 """
 
+import os
 import re
-import tempfile
+import urllib.parse
 from typing import Dict, List, Optional, Tuple, Union
-from email.parser import BytesParser
-from email.message import Message
+
+
+class FormParseError(ValueError):
+    """Raised when a request body cannot be parsed."""
+
+
+class SizeLimitExceeded(ValueError):
+    """Raised when an upload exceeds a configured size limit."""
 
 
 class UploadedFile:
-    """Represents an uploaded file."""
+    """Represents an uploaded file held in memory before it is saved."""
 
     def __init__(self, filename: str, content: bytes, content_type: str):
         self.filename = filename
@@ -24,9 +32,10 @@ class UploadedFile:
 class FormData:
     """Represents parsed form data.
 
-    Fields with the same name (e.g., multiple checkboxes or multi-select) are
-    stored as lists. Single values are stored as strings for backward compatibility.
-    Files with the same name are stored as lists of UploadedFile objects.
+    Fields with the same name (e.g. multiple checkboxes or a multi-select) are
+    stored as lists. Single values are stored as strings. Files with the same
+    name (e.g. ``<input type="file" multiple>``) are stored as lists of
+    UploadedFile objects.
     """
 
     def __init__(self):
@@ -34,7 +43,7 @@ class FormData:
         self.files: Dict[str, Union[UploadedFile, List[UploadedFile]]] = {}
 
     def add_field(self, name: str, value: str) -> None:
-        """Add a field value, converting to list if name already exists."""
+        """Add a field value, converting to a list if the name already exists."""
         if name in self.fields:
             existing = self.fields[name]
             if isinstance(existing, list):
@@ -44,8 +53,8 @@ class FormData:
         else:
             self.fields[name] = value
 
-    def add_file(self, name: str, uploaded_file: 'UploadedFile') -> None:
-        """Add an uploaded file, converting to list if name already exists."""
+    def add_file(self, name: str, uploaded_file: UploadedFile) -> None:
+        """Add an uploaded file, converting to a list if the name already exists."""
         if name in self.files:
             existing = self.files[name]
             if isinstance(existing, list):
@@ -55,10 +64,19 @@ class FormData:
         else:
             self.files[name] = uploaded_file
 
+    def iter_files(self):
+        """Yield (name, UploadedFile) pairs, flattening repeated file fields."""
+        for name, value in self.files.items():
+            if isinstance(value, list):
+                for item in value:
+                    yield name, item
+            else:
+                yield name, value
+
 
 def parse_size_limit(limit_str: Optional[str]) -> Optional[int]:
     """
-    Parse size limit string to bytes.
+    Parse a size limit string to bytes.
 
     Examples:
         "5M" -> 5242880
@@ -66,12 +84,15 @@ def parse_size_limit(limit_str: Optional[str]) -> Optional[int]:
         "1G" -> 1073741824
 
     Args:
-        limit_str: Size limit string (e.g., "5M", "200K")
+        limit_str: Size limit string (e.g. "5M", "200K"), or None for no limit
 
     Returns:
-        Size in bytes or None if no limit
+        Size in bytes, or None if no limit was given
+
+    Raises:
+        ValueError: If the string is not a valid size
     """
-    if not limit_str:
+    if limit_str is None or limit_str.strip() == '':
         return None
 
     limit_str = limit_str.strip().upper()
@@ -100,94 +121,85 @@ def parse_multipart(
     max_total_size: Optional[int] = None
 ) -> FormData:
     """
-    Parse multipart/form-data request body.
+    Parse a multipart/form-data request body.
 
     Args:
         body: Request body as bytes
         content_type: Content-Type header value
-        max_file_size: Maximum size for individual files
-        max_total_size: Maximum total size (checked before parsing)
+        max_file_size: Maximum size for an individual file (None = no limit)
+        max_total_size: Maximum total body size (None = no limit)
 
     Returns:
         FormData instance
 
     Raises:
-        ValueError: If parsing fails or size limits exceeded
+        SizeLimitExceeded: If a size limit is exceeded
+        FormParseError: If the body cannot be parsed
     """
-    # Check total size limit
-    if max_total_size and len(body) > max_total_size:
-        raise ValueError(f'Total upload size {len(body)} exceeds limit {max_total_size}')
+    if max_total_size is not None and len(body) > max_total_size:
+        raise SizeLimitExceeded(f'Total upload size {len(body)} exceeds limit {max_total_size}')
 
-    # Extract boundary from content type
     boundary = extract_boundary(content_type)
     if not boundary:
-        raise ValueError('No boundary found in Content-Type header')
+        raise FormParseError('No boundary found in Content-Type header')
 
-    # Parse parts
     form_data = FormData()
-    parts = split_multipart_body(body, boundary)
 
-    for part in parts:
-        if not part:
-            continue
-
+    for part in split_multipart_body(body, boundary):
         headers, content = parse_part(part)
         disposition = headers.get('content-disposition', '')
+        params = parse_header_params(disposition)
 
-        # Extract field name and filename
-        name = extract_value_from_header(disposition, 'name')
-        filename = extract_value_from_header(disposition, 'filename')
+        name = params.get('name')
+        if name is None:
+            # RFC 7578 requires a name; ignore parts without one
+            continue
 
-        if filename:
-            # File upload
-            if max_file_size and len(content) > max_file_size:
-                raise ValueError(
+        filename = params.get('filename')
+        if filename is not None:
+            if max_file_size is not None and len(content) > max_file_size:
+                raise SizeLimitExceeded(
                     f'File {filename} size {len(content)} exceeds limit {max_file_size}'
                 )
-
             content_type_part = headers.get('content-type', 'application/octet-stream')
             form_data.add_file(name, UploadedFile(filename, content, content_type_part))
         else:
-            # Regular field - decode as UTF-8
-            try:
-                form_data.add_field(name, content.decode('utf-8'))
-            except UnicodeDecodeError:
-                # If decoding fails, store as empty string
-                form_data.add_field(name, '')
+            # Form fields are UTF-8 text; undecodable bytes are replaced rather than dropped
+            form_data.add_field(name, content.decode('utf-8', errors='replace'))
 
     return form_data
 
 
 def parse_urlencoded(body: bytes) -> FormData:
     """
-    Parse application/x-www-form-urlencoded request body.
+    Parse an application/x-www-form-urlencoded request body.
 
     Args:
         body: Request body as bytes
 
     Returns:
         FormData instance
-    """
-    from urllib.parse import parse_qs
 
+    Raises:
+        FormParseError: If the body is not valid UTF-8
+    """
     form_data = FormData()
     try:
-        parsed = parse_qs(body.decode('utf-8'), keep_blank_values=True)
-        # parse_qs returns lists - preserve multiple values for repeated fields
-        for key, values in parsed.items():
-            if len(values) == 1:
-                form_data.fields[key] = values[0]
-            else:
-                form_data.fields[key] = values
-    except UnicodeDecodeError:
-        pass
+        text = body.decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise FormParseError(f'Form body is not valid UTF-8: {e}') from e
+
+    parsed = urllib.parse.parse_qs(text, keep_blank_values=True)
+    for key, values in parsed.items():
+        for value in values:
+            form_data.add_field(key, value)
 
     return form_data
 
 
 def extract_boundary(content_type: str) -> Optional[str]:
     """
-    Extract boundary from Content-Type header.
+    Extract the boundary parameter from a Content-Type header.
 
     Args:
         content_type: Content-Type header value
@@ -195,49 +207,91 @@ def extract_boundary(content_type: str) -> Optional[str]:
     Returns:
         Boundary string or None
     """
-    match = re.search(r'boundary=([^;]+)', content_type, re.IGNORECASE)
-    if match:
-        boundary = match.group(1).strip()
-        # Remove quotes if present
-        if boundary.startswith('"') and boundary.endswith('"'):
-            boundary = boundary[1:-1]
+    params = parse_header_params(content_type)
+    boundary = params.get('boundary')
+    if boundary:
         return boundary
     return None
 
 
+_PARAM_RE = re.compile(
+    r';\s*([A-Za-z0-9_.*-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;]*))'
+)
+
+
+def parse_header_params(header: str) -> Dict[str, str]:
+    """
+    Parse the ``; key=value`` parameters of a header such as Content-Disposition.
+
+    Parameters are only recognised after a ``;`` so ``filename=`` can never be
+    mistaken for ``name=``. Quoted values may contain backslash escapes. A
+    ``key*=charset''value`` (RFC 5987) parameter is decoded and stored under
+    ``key``.
+
+    Args:
+        header: Full header value, e.g. ``form-data; name="f"; filename="a.txt"``
+
+    Returns:
+        Dict of lower-cased parameter names to values
+    """
+    params: Dict[str, str] = {}
+    for match in _PARAM_RE.finditer(header):
+        key = match.group(1).lower()
+        if match.group(2) is not None:
+            value = re.sub(r'\\(.)', r'\1', match.group(2))
+        else:
+            value = (match.group(3) or '').strip()
+
+        if key.endswith('*'):
+            key = key[:-1]
+            value = _decode_rfc5987(value)
+            params[key] = value
+        elif key not in params:
+            params[key] = value
+    return params
+
+
+def _decode_rfc5987(value: str) -> str:
+    """Decode a ``charset'lang'percent-encoded`` extended parameter value."""
+    parts = value.split("'", 2)
+    if len(parts) == 3:
+        charset, _, encoded = parts
+        try:
+            return urllib.parse.unquote(encoded, encoding=charset or 'utf-8', errors='replace')
+        except LookupError:
+            return urllib.parse.unquote(encoded, errors='replace')
+    return urllib.parse.unquote(value, errors='replace')
+
+
 def split_multipart_body(body: bytes, boundary: str) -> List[bytes]:
     """
-    Split multipart body into individual parts.
+    Split a multipart body into its parts (headers and content, undecoded).
+
+    A delimiter is only recognised at the start of a line, so a boundary string
+    that happens to occur inside a part's content is left untouched. Exactly the
+    CRLF (or LF) that precedes each delimiter is consumed; all other bytes of a
+    part are preserved.
 
     Args:
         body: Request body
-        boundary: Boundary string
+        boundary: Boundary string from the Content-Type header
 
     Returns:
-        List of part bodies
+        List of raw parts
     """
-    # Boundary appears as --boundary between parts and --boundary-- at the end
-    boundary_bytes = ('--' + boundary).encode('utf-8')
-    end_boundary_bytes = ('--' + boundary + '--').encode('utf-8')
+    delimiter = re.compile(
+        rb'(?:^|\r?\n)--' + re.escape(boundary.encode('utf-8')) + rb'(--)?[ \t]*(?:\r?\n|$)'
+    )
 
-    # Split by boundary
-    parts = body.split(boundary_bytes)
-
-    # Remove first empty part and last part (after end boundary)
-    if parts:
-        parts = parts[1:]  # Skip preamble
-
-    # Remove final boundary marker and strip leading CRLF from each part
-    result = []
-    for part in parts:
-        if part.startswith(b'--'):  # End boundary
+    matches = list(delimiter.finditer(body))
+    parts = []
+    for i, match in enumerate(matches):
+        if match.group(1):  # closing delimiter --boundary--
             break
-        # Strip leading CRLF or LF
-        part = part.lstrip(b'\r\n')
-        if part:
-            result.append(part)
-
-    return result
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        parts.append(body[start:end])
+    return parts
 
 
 def parse_part(part: bytes) -> Tuple[Dict[str, str], bytes]:
@@ -245,112 +299,93 @@ def parse_part(part: bytes) -> Tuple[Dict[str, str], bytes]:
     Parse a single multipart part into headers and content.
 
     Args:
-        part: Part body
+        part: Raw part (headers, blank line, content)
 
     Returns:
-        Tuple of (headers_dict, content)
+        Tuple of (headers_dict, content). Header names are lower-cased. Header
+        values are decoded as UTF-8, which is how browsers send non-ASCII
+        filenames.
     """
-    # Split headers and content (separated by \r\n\r\n or \n\n)
-    if b'\r\n\r\n' in part:
-        header_data, content = part.split(b'\r\n\r\n', 1)
-    elif b'\n\n' in part:
-        header_data, content = part.split(b'\n\n', 1)
+    crlf_idx = part.find(b'\r\n\r\n')
+    lf_idx = part.find(b'\n\n')
+    if crlf_idx != -1 and (lf_idx == -1 or crlf_idx <= lf_idx):
+        header_data, content = part[:crlf_idx], part[crlf_idx + 4:]
+    elif lf_idx != -1:
+        header_data, content = part[:lf_idx], part[lf_idx + 2:]
     else:
-        # No content, only headers
-        header_data = part
-        content = b''
+        header_data, content = part, b''
 
-    # Strip leading/trailing whitespace and newlines
-    content = content.rstrip(b'\r\n')
-
-    # Parse headers using email parser
-    headers = {}
-    try:
-        # Add a dummy "From" header to make it a valid email message
-        header_data = b'From: dummy\r\n' + header_data
-        msg = BytesParser().parsebytes(header_data)
-        for key in msg.keys():
-            if key.lower() != 'from':
-                headers[key.lower()] = msg[key]
-    except Exception:
-        pass
+    headers: Dict[str, str] = {}
+    for line in header_data.decode('utf-8', errors='replace').splitlines():
+        if ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        headers[key.strip().lower()] = value.strip()
 
     return headers, content
 
 
 def extract_value_from_header(header: str, param: str) -> Optional[str]:
     """
-    Extract parameter value from Content-Disposition header.
+    Extract a single parameter value from a header such as Content-Disposition.
 
     Args:
-        header: Header value (e.g., 'form-data; name="field1"; filename="test.txt"')
-        param: Parameter name to extract (e.g., 'name', 'filename')
+        header: Header value (e.g. 'form-data; name="field1"; filename="test.txt"')
+        param: Parameter name to extract (e.g. 'name', 'filename')
 
     Returns:
         Parameter value or None
     """
-    # Match param="value" or param=value
-    pattern = rf'{param}=(?:"([^"]*)"|([^;\s]+))'
-    match = re.search(pattern, header, re.IGNORECASE)
-    if match:
-        return match.group(1) or match.group(2)
-    return None
+    return parse_header_params(header).get(param.lower())
 
 
 def save_uploaded_file(uploaded_file: UploadedFile, directory: str) -> str:
     """
-    Save uploaded file to directory.
+    Save an uploaded file to a directory, avoiding name collisions.
 
     Args:
         uploaded_file: UploadedFile instance
-        directory: Target directory
+        directory: Target directory (must exist)
 
     Returns:
-        Full path to saved file
+        Full path to the saved file
     """
-    import os
-    # Sanitize filename
     filename = sanitize_filename(uploaded_file.filename)
-    filepath = os.path.join(directory, filename)
-
-    # Handle duplicate filenames
-    if os.path.exists(filepath):
-        base, ext = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(filepath):
-            filename = f'{base}_{counter}{ext}'
-            filepath = os.path.join(directory, filename)
+    base, ext = os.path.splitext(filename)
+    counter = 0
+    while True:
+        candidate = filename if counter == 0 else f'{base}_{counter}{ext}'
+        filepath = os.path.join(directory, candidate)
+        try:
+            # O_EXCL makes the collision check atomic
+            fd = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
             counter += 1
-
-    # Write file
-    with open(filepath, 'wb') as f:
-        f.write(uploaded_file.content)
-
-    return filepath
+            continue
+        with os.fdopen(fd, 'wb') as f:
+            f.write(uploaded_file.content)
+        return filepath
 
 
 def sanitize_filename(filename: str) -> str:
     """
-    Sanitize filename to prevent directory traversal.
+    Sanitize a filename to prevent directory traversal.
 
     Args:
-        filename: Original filename
+        filename: Original filename from the client
 
     Returns:
-        Sanitized filename
+        A safe basename
     """
-    import os
     # Strip any directory components (handle both / and \ regardless of OS)
-    # Replace backslashes with forward slashes first
     filename = filename.replace('\\', '/')
-    # Get basename to prevent directory traversal
     filename = os.path.basename(filename)
     # Replace any remaining problematic characters
     filename = re.sub(r'[^\w\s.-]', '_', filename)
     # Limit length
     if len(filename) > 255:
         filename = filename[:255]
-    # Ensure not empty
+    # Ensure not empty or a special directory name
     if not filename or filename in ('.', '..'):
         filename = 'upload'
     return filename

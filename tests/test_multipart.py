@@ -214,3 +214,103 @@ class TestUploadedFile:
         assert uploaded.content == content
         assert uploaded.content_type == 'text/plain'
         assert uploaded.size == len(content)
+
+
+class TestPayloadFidelity:
+    """Regression tests for byte-exact multipart handling."""
+
+    B = 'XYZ'
+    CT = 'multipart/form-data; boundary=XYZ'
+
+    def _part(self, headers, content):
+        return f'--{self.B}\r\n{headers}\r\n\r\n'.encode() + content + b'\r\n'
+
+    def _body(self, *parts):
+        return b''.join(parts) + f'--{self.B}--\r\n'.encode()
+
+    def test_trailing_newlines_in_file_are_preserved(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="f"; filename="t.txt"', b'hello\n\n'))
+        result = parse_multipart(body, self.CT)
+        assert result.files['f'].content == b'hello\n\n'
+
+    def test_trailing_crlf_in_field_is_preserved(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="msg"', b'line1\r\n'))
+        result = parse_multipart(body, self.CT)
+        assert result.fields['msg'] == 'line1\r\n'
+
+    def test_binary_content_ending_in_cr_or_lf_bytes(self):
+        payload = bytes(range(256)) + b'\r\n\r\n\n\r'
+        body = self._body(self._part('Content-Disposition: form-data; name="f"; filename="b.bin"', payload))
+        result = parse_multipart(body, self.CT)
+        assert result.files['f'].content == payload
+
+    def test_boundary_text_inside_payload_is_not_a_delimiter(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="f"', b'abc--XYZxyz'))
+        result = parse_multipart(body, self.CT)
+        assert result.fields == {'f': 'abc--XYZxyz'}
+
+    def test_empty_field_value(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="f"', b''))
+        result = parse_multipart(body, self.CT)
+        assert result.fields == {'f': ''}
+
+    def test_lf_only_line_endings(self):
+        body = b'--XYZ\nContent-Disposition: form-data; name="f"\n\nvalue\n--XYZ--\n'
+        result = parse_multipart(body, self.CT)
+        assert result.fields == {'f': 'value'}
+
+    def test_utf8_filename(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="f"; filename="café.txt"', b'x'))
+        result = parse_multipart(body, self.CT)
+        assert result.files['f'].filename == 'café.txt'
+
+    def test_filename_before_name_parameter(self):
+        body = self._body(self._part('Content-Disposition: form-data; filename="x.txt"; name="f"', b'x'))
+        result = parse_multipart(body, self.CT)
+        assert list(result.files) == ['f']
+        assert result.files['f'].filename == 'x.txt'
+
+    def test_quoted_filename_with_escaped_quote(self):
+        body = self._body(self._part(r'Content-Disposition: form-data; name="f"; filename="a\"b.txt"', b'x'))
+        result = parse_multipart(body, self.CT)
+        assert result.files['f'].filename == 'a"b.txt'
+
+    def test_rfc5987_filename(self):
+        body = self._body(self._part(
+            "Content-Disposition: form-data; name=\"f\"; filename*=UTF-8''caf%C3%A9.txt", b'x'))
+        result = parse_multipart(body, self.CT)
+        assert result.files['f'].filename == 'café.txt'
+
+    def test_repeated_file_field_becomes_list(self):
+        body = self._body(
+            self._part('Content-Disposition: form-data; name="docs"; filename="a.txt"', b'A'),
+            self._part('Content-Disposition: form-data; name="docs"; filename="b.txt"', b'B'),
+        )
+        result = parse_multipart(body, self.CT)
+        files = result.files['docs']
+        assert isinstance(files, list)
+        assert [f.filename for f in files] == ['a.txt', 'b.txt']
+        assert [(n, f.content) for n, f in result.iter_files()] == [('docs', b'A'), ('docs', b'B')]
+
+    def test_part_without_name_is_ignored(self):
+        body = self._body(self._part('Content-Disposition: form-data', b'x'))
+        result = parse_multipart(body, self.CT)
+        assert result.fields == {} and result.files == {}
+
+    def test_zero_file_size_limit_is_enforced(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="f"; filename="t.txt"', b'x'))
+        with pytest.raises(ValueError):
+            parse_multipart(body, self.CT, max_file_size=0)
+
+    def test_quoted_boundary(self):
+        body = self._body(self._part('Content-Disposition: form-data; name="f"', b'v'))
+        result = parse_multipart(body, 'multipart/form-data; boundary="XYZ"')
+        assert result.fields == {'f': 'v'}
+
+    def test_urlencoded_repeated_values(self):
+        result = parse_urlencoded(b'a=1&a=2&b=3')
+        assert result.fields == {'a': ['1', '2'], 'b': '3'}
+
+    def test_urlencoded_invalid_utf8_raises(self):
+        with pytest.raises(ValueError):
+            parse_urlencoded(b'a=\xff')

@@ -4,6 +4,7 @@ Ephemeral web server for readwebform.
 
 import html
 import http.server
+import os
 import secrets
 import socketserver
 import ssl
@@ -14,7 +15,8 @@ import time
 from typing import Optional, Callable, Tuple
 from urllib.parse import urlparse, parse_qs
 
-from .multipart import parse_multipart, parse_urlencoded, FormData, save_uploaded_file
+from .multipart import (parse_multipart, parse_urlencoded, FormData, save_uploaded_file,
+                        SizeLimitExceeded, FormParseError)
 from .browser import launch_browser
 
 
@@ -68,9 +70,15 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
 
         # Get Content-Type and Content-Length
         content_type = self.headers.get('Content-Type', '')
+        length_header = self.headers.get('Content-Length')
+        if length_header is None:
+            self._send_error_page(411, 'Length Required', 'Content-Length header is required')
+            return
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-        except (ValueError, TypeError):
+            content_length = int(length_header)
+            if content_length < 0:
+                raise ValueError('negative')
+        except ValueError:
             self._send_error_page(400, 'Bad Request', 'Invalid Content-Length header')
             return
 
@@ -105,14 +113,13 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
                 )
             else:
                 form_data = parse_urlencoded(body)
-        except ValueError as e:
-            # Size limit exceeded
+        except SizeLimitExceeded as e:
             self._send_error_page(413, 'Payload Too Large', str(e))
             if self.reset_timeout_callback:
                 self.reset_timeout_callback()
             print(f'Upload limit exceeded: {e}', file=sys.stderr)
             return
-        except Exception as e:
+        except (FormParseError, Exception) as e:
             self._send_error_page(400, 'Bad Request', f'Failed to parse form data: {e}')
             if self.reset_timeout_callback:
                 self.reset_timeout_callback()
@@ -150,20 +157,32 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
             shutdown_thread.start()
             return
 
-        # Save uploaded files
-        file_metadata = {}
-        for name, uploaded_file in form_data.files.items():
-            try:
+        # Save uploaded files. Repeated file fields (<input type="file" multiple>)
+        # produce a list of metadata dicts under the field name.
+        file_metadata: dict = {}
+        saved_paths = []
+        try:
+            for name, uploaded_file in form_data.iter_files():
                 filepath = save_uploaded_file(uploaded_file, self.upload_dir)
-                file_metadata[name] = {
+                saved_paths.append(filepath)
+                meta = {
                     'filename': uploaded_file.filename,
                     'path': filepath,
                     'size': uploaded_file.size,
                     'content_type': uploaded_file.content_type
                 }
-            except Exception as e:
-                self._send_error_page(500, 'Internal Server Error', f'Failed to save file: {e}')
-                return
+                if isinstance(form_data.files[name], list):
+                    file_metadata.setdefault(name, []).append(meta)
+                else:
+                    file_metadata[name] = meta
+        except Exception as e:
+            for path in saved_paths:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            self._send_error_page(500, 'Internal Server Error', f'Failed to save file: {e}')
+            return
 
         # Store form data for retrieval
         self.form_data = form_data
