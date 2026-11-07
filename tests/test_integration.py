@@ -606,6 +606,7 @@ class TestCLIProcessBehavior:
         assert 'http://127.0.0.1:' in stderr, \
             "Should print server URL to stderr"
 
+    @pytest.mark.skipif(sys.platform == 'win32', reason='SIGINT semantics differ on Windows')
     def test_process_handles_keyboard_interrupt(self):
         """Test that process exits gracefully on keyboard interrupt."""
         # Run readwebform as subprocess

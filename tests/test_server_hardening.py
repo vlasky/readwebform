@@ -240,8 +240,62 @@ class TestLifecycle:
 
     def test_temp_dir_removed_on_timeout(self):
         server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.3)
+        created = server.get_upload_dir()
+        assert os.path.isdir(created)
         server.serve()
-        assert server.upload_dir is None or not os.path.exists(server.upload_dir)
+        assert not os.path.exists(created)
+
+    def test_upload_dir_cannot_be_created_after_completion(self):
+        from readwebform.server import SessionFinished
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.3)
+        server.serve()
+        with pytest.raises(SessionFinished):
+            server.get_upload_dir()
+
+    def test_complete_is_first_wins_under_contention(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        results = []
+        barrier = threading.Barrier(8)
+
+        def contender(i):
+            barrier.wait()
+            results.append(server.complete('success', None, {'n': i}))
+
+        threads = [threading.Thread(target=contender, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert results.count(True) == 1
+        assert server.outcome == 'success'
+
+    def test_stale_timer_callback_is_ignored_after_reset(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=60)
+        server._start_timer()
+        stale_generation = server._timer_generation
+        server.reset_timeout()  # replaces the timer; a pending old callback must not fire
+        server._on_timeout(stale_generation)
+        assert server.outcome is None
+        assert not server.shutdown_event.is_set()
+        server._on_timeout(server._timer_generation)
+        assert server.timed_out
+        if server.timeout_timer:
+            server.timeout_timer.cancel()
+
+    def test_non_ascii_csrf_token_gets_403(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        with Running(server):
+            data = urllib.parse.urlencode({'_csrf_token': 'caf\u00e9', 'a': '1'}).encode()
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(urllib.request.Request(server.get_url(), data=data), timeout=3)
+            assert exc.value.code == 403
+            assert not server.shutdown_event.is_set()
+
+    def test_cert_without_key_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError):
+            FormServer('<form></form>', cert_file=str(tmp_path / 'c.pem'))
+        with pytest.raises(ValueError):
+            FormServer('<form></form>', key_file=str(tmp_path / 'k.pem'))
 
     def test_explicit_upload_dir_is_used(self, tmp_path):
         target = tmp_path / 'uploads'
@@ -328,6 +382,12 @@ class TestIdleConnections:
             assert time.monotonic() - start < 2
             post_fields(server, {'a': '1'})
             success, _, _, _ = run.wait()
+            # Shutdown must have closed the idle connection from the server side
+            idle.settimeout(2)
+            try:
+                assert idle.recv(16) == b''
+            except (ConnectionError, OSError):
+                pass
             idle.close()
         assert success
 
@@ -357,5 +417,11 @@ class TestIdleConnections:
             urllib.request.urlopen(urllib.request.Request(server.get_url(), data=data),
                                    timeout=3, context=ctx)
             success, _, _, _ = run.wait()
+            # The never-handshaked TLS connection is tracked and closed on shutdown
+            idle.settimeout(2)
+            try:
+                assert idle.recv(16) == b''
+            except (ConnectionError, OSError):
+                pass
             idle.close()
         assert success

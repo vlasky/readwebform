@@ -115,6 +115,7 @@ def run_readwebform(args) -> int:
         return EXIT_SUCCESS
 
     except KeyboardInterrupt:
+        _emit_failure(args, 'interrupted')
         print('\nInterrupted by user', file=sys.stderr)
         return EXIT_INTERRUPTED
     except Exception as e:

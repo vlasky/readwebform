@@ -293,6 +293,21 @@ class TestPayloadFidelity:
         assert [f.filename for f in files] == ['a.txt', 'b.txt']
         assert [(n, f.content) for n, f in result.iter_files()] == [('docs', b'A'), ('docs', b'B')]
 
+    def test_folded_content_disposition_header(self):
+        body = (b'--XYZ\r\nContent-Disposition: form-data;\r\n name="doc"; filename="a.txt"\r\n'
+                b'Content-Type: text/plain\r\n\r\nhello\r\n--XYZ--\r\n')
+        result = parse_multipart(body, self.CT)
+        assert result.files['doc'].filename == 'a.txt'
+        assert result.files['doc'].content == b'hello'
+
+    def test_unselected_file_input_is_an_empty_field_not_a_file(self):
+        body = self._body(self._part(
+            'Content-Disposition: form-data; name="doc"; filename=""\r\nContent-Type: application/octet-stream',
+            b''))
+        result = parse_multipart(body, self.CT)
+        assert result.files == {}
+        assert result.fields == {'doc': ''}
+
     def test_part_without_name_is_ignored(self):
         body = self._body(self._part('Content-Disposition: form-data', b'x'))
         result = parse_multipart(body, self.CT)

@@ -3,6 +3,9 @@ Tests for output formatting.
 """
 
 import json
+import sys
+
+import pytest
 
 from readwebform.output import format_env_output, format_json_output, is_valid_var_name, sanitize_env_value
 
@@ -215,6 +218,7 @@ class TestRepeatedFieldsAndNames:
         assert 'export WEBFORM_PICS_COUNT=2' in output
         assert 'export WEBFORM_PICS_2_PATH=/tmp/x/p2.png' in output
 
+    @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX permission bits')
     def test_envfile_is_owner_only(self, tmp_path):
         import os
         import stat

@@ -171,6 +171,12 @@ class TestCLIValidation:
         parser = ReadWebFormArgumentParser()
         assert parser.parse_args(['--timeout', '0.5']).timeout == 0.5
 
+    def test_non_finite_timeout_rejected(self):
+        parser = ReadWebFormArgumentParser()
+        for value in ['inf', 'nan', '-inf']:
+            with pytest.raises(SystemExit):
+                parser.parse_args(['--timeout', value])
+
     def test_upload_dir_and_env_prefix(self):
         parser = ReadWebFormArgumentParser()
         args = parser.parse_args(['--upload-dir', '/tmp/up', '--env-prefix', 'FORM_'])

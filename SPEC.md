@@ -163,9 +163,7 @@ Options are comma-separated. A segment without `=` that is not a known flag cont
 
 ## Upload Handling
 
--   Uploaded files are stored in a temporary directory (e.g. `/tmp/readwebform_XXXX`).
-    
--   The directory name includes the random endpoint for traceability.
+-   Uploaded files are stored in a temporary directory (e.g. `/tmp/readwebform_XXXX`) created when the first file is saved, or in the directory given with `--upload-dir`. A temporary directory that is left empty is removed when the server stops.
     
 -   Files are **not automatically deleted** to allow downstream access.
     
@@ -194,7 +192,7 @@ If exceeded:
     
 -   The server logs the violation to stderr.
     
--   Exit code `6` is returned.
+-   The form stays open so the user can retry; the timeout is restarted unless `--reset-timeout-on-error false`.
     
 
 * * *

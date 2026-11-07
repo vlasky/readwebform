@@ -156,7 +156,9 @@ def parse_multipart(
             continue
 
         filename = params.get('filename')
-        if filename is not None:
+        # An unselected <input type="file"> arrives as filename="" with an
+        # empty body; browsers always send it, so treat it as an empty field.
+        if filename:
             if max_file_size is not None and len(content) > max_file_size:
                 raise SizeLimitExceeded(
                     f'File {filename} size {len(content)} exceeds limit {max_file_size}'
@@ -316,11 +318,17 @@ def parse_part(part: bytes) -> tuple[dict[str, str], bytes]:
         header_data, content = part, b''
 
     headers: dict[str, str] = {}
+    last_key: Optional[str] = None
     for line in header_data.decode('utf-8', errors='replace').splitlines():
+        if line[:1] in (' ', '\t') and last_key is not None:
+            # Folded header continuation line (RFC 5322 section 2.2.3)
+            headers[last_key] += ' ' + line.strip()
+            continue
         if ':' not in line:
             continue
         key, value = line.split(':', 1)
-        headers[key.strip().lower()] = value.strip()
+        last_key = key.strip().lower()
+        headers[last_key] = value.strip()
 
     return headers, content
 

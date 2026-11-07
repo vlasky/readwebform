@@ -3,6 +3,7 @@ Command-line interface for readwebform.
 """
 
 import argparse
+import math
 import sys
 
 from .multipart import parse_size_limit
@@ -204,8 +205,8 @@ class ReadWebFormArgumentParser:
         if input_sources > 1:
             self.parser.error('Only one input source allowed: --html, --htmlfile, or --field')
 
-        if args.timeout <= 0:
-            self.parser.error('--timeout must be a positive number')
+        if not math.isfinite(args.timeout) or args.timeout <= 0:
+            self.parser.error('--timeout must be a positive, finite number of seconds')
 
         if args.port is not None and (args.port < 1 or args.port > 65535):
             self.parser.error('--port must be between 1 and 65535')

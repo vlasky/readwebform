@@ -137,7 +137,7 @@ cat form.html | readwebform
 | `--html "<string>"` | Inline HTML fragment or document containing one `<form>` element |
 | `--htmlfile <path>` | Path to an HTML file containing a form |
 | `--field <spec>` | Declaratively define form fields (repeatable) |
-| `--title <string>` | Page title, shown as a heading above the form and in the browser tab |
+| `--title <string>` | Page title, shown as a heading above the form and in the browser tab (an existing `<title>` in a complete document is kept) |
 | `--text <string>` | Instructional text shown above the form |
 | `--host <ip>` | IPv4 or IPv6 address to bind to (default: `127.0.0.1`) |
 | `--port <int>` | TCP port (default: random available port) |
@@ -532,7 +532,7 @@ readwebform \
 
 ```bash
 readwebform \
-  --html '<form><input type="file" name="doc" accept=".pdf"><button>Submit</button></form>' \
+  --html '<form enctype="multipart/form-data"><input type="file" name="doc" accept=".pdf"><button>Submit</button></form>' \
   --max-file-size 5M \
   --timeout 600
 ```

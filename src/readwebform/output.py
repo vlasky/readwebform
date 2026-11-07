@@ -141,6 +141,11 @@ def write_env_file(filepath: str, fields: dict[str, Union[str, list[str]]],
     """
     Write environment variable exports to a file readable only by the owner.
 
+    On POSIX the file is created with, or changed to, mode 0600; if an
+    existing file cannot be changed, OSError is raised and nothing is written.
+    Windows has no equivalent permission bits, so there the file inherits the
+    directory's ACL.
+
     Args:
         filepath: Output path (created or truncated with mode 0600)
         fields: Field names to values
@@ -150,9 +155,14 @@ def write_env_file(filepath: str, fields: dict[str, Union[str, list[str]]],
     content = format_env_output(fields, prefix, files)
     fd = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        # The mode above only applies to a newly created file
-        os.fchmod(fd, 0o600)
-    except (AttributeError, OSError):
-        pass
+        # The mode above only applies to a newly created file. If the file
+        # exists and cannot be made owner-only, refuse to write secrets to it.
+        if hasattr(os, 'fchmod'):
+            os.fchmod(fd, 0o600)
+        else:  # pragma: no cover - Windows has no fchmod; chmod only sets read-only
+            os.chmod(filepath, 0o600)
+    except OSError:
+        os.close(fd)
+        raise
     with os.fdopen(fd, 'w', encoding='utf-8') as f:
         f.write(content)

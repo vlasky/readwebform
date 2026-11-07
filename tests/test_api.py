@@ -564,3 +564,10 @@ class TestFieldIntegration:
         assert 'name="email"' in html
         assert 'type="text"' in html
         assert 'type="email"' in html
+
+
+class TestTLSConfiguration:
+    def test_cert_without_key_raises(self, tmp_path):
+        from readwebform import read_webform
+        with pytest.raises(ValueError):
+            read_webform('<form><button>Go</button></form>', cert_file=str(tmp_path / 'c.pem'))

@@ -61,6 +61,10 @@ OUTCOME_STOPPED = 'stopped'
 _QUIET_ERRORS = (ssl.SSLError, socket.timeout, TimeoutError, ConnectionError)
 
 
+class SessionFinished(RuntimeError):
+    """Raised when a handler tries to do work after the session's outcome is set."""
+
+
 class _FormHTTPServer(http.server.ThreadingHTTPServer):
     """Threaded HTTP server that carries the owning FormServer as instance state."""
 
@@ -134,15 +138,24 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         return self.form_server.session
 
     def setup(self):
-        self.form_server.track_connection(self.request)
         ctx = self.form_server.ssl_context
         if ctx is not None:
             # Handshake here, on the connection thread and under the socket
             # timeout, rather than inside accept() on the serving thread.
+            # wrap_socket() moves the descriptor to a new SSLSocket, so track
+            # that object: it is the one server_close() must close.
             self.request.settimeout(self.timeout)
             self.request = ctx.wrap_socket(self.request, server_side=True,
                                            do_handshake_on_connect=False)
-            self.request.do_handshake()
+            self.form_server.track_connection(self.request)
+            try:
+                self.request.do_handshake()
+            except BaseException:
+                self.form_server.untrack_connection(self.request)
+                self.request.close()
+                raise
+        else:
+            self.form_server.track_connection(self.request)
         super().setup()
 
     def finish(self):
@@ -238,7 +251,7 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
 
         submitted_token = form_data.fields.pop('_csrf_token', '')
         if isinstance(submitted_token, list) or not secrets.compare_digest(
-                str(submitted_token), session.csrf_token):
+                str(submitted_token).encode('utf-8'), session.csrf_token.encode('utf-8')):
             self._send_error_page(403, 'Forbidden', 'Invalid CSRF token')
             session.note_recoverable_error()
             return
@@ -270,6 +283,10 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
                     file_metadata.setdefault(name, []).append(meta)
                 else:
                     file_metadata[name] = meta
+        except SessionFinished:
+            _unlink_all(saved_paths)
+            self._send_error_page(410, 'Gone', 'This form has already been completed')
+            return
         except Exception as e:
             _unlink_all(saved_paths)
             self._send_error_page(500, 'Internal Server Error', f'Failed to save file: {e}')
@@ -280,6 +297,7 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         # mid-response cannot lose an accepted submission.
         if not session.complete(OUTCOME_SUCCESS, form_data, file_metadata):
             _unlink_all(saved_paths)
+            session._cleanup_upload_dir()
             self._send_error_page(410, 'Gone', 'This form has already been completed')
             return
 
@@ -389,6 +407,8 @@ class FormServer:
         self.max_total_size = max_total_size
         self.timeout = timeout
         self.reset_timeout_on_error = reset_timeout_on_error
+        if (cert_file is None) != (key_file is None):
+            raise ValueError('cert_file and key_file must be given together')
         self.cert_file = cert_file
         self.key_file = key_file
         self.use_ssl = cert_file is not None and key_file is not None
@@ -405,6 +425,7 @@ class FormServer:
         self.form_data: Optional[FormData] = None
         self.file_metadata: dict = {}
         self.timeout_timer: Optional[threading.Timer] = None
+        self._timer_generation = 0
 
         # Set when serve() should stop waiting. Setting it from outside stops
         # the server (outcome 'stopped').
@@ -443,14 +464,18 @@ class FormServer:
             True if this call recorded the outcome, False if one was already set.
         """
         with self._lock:
-            if self._outcome is not None or self.shutdown_event.is_set():
-                return False
-            self._outcome = outcome
-            self.form_data = form_data
-            self.file_metadata = file_metadata or {}
-            if self.timeout_timer is not None:
-                self.timeout_timer.cancel()
-                self.timeout_timer = None
+            return self._complete_locked(outcome, form_data, file_metadata)
+
+    def _complete_locked(self, outcome: str, form_data: Optional[FormData],
+                         file_metadata: Optional[dict]) -> bool:
+        if self._outcome is not None or self.shutdown_event.is_set():
+            return False
+        self._outcome = outcome
+        self.form_data = form_data
+        self.file_metadata = file_metadata or {}
+        if self.timeout_timer is not None:
+            self.timeout_timer.cancel()
+            self.timeout_timer = None
         return True
 
     def release(self) -> None:
@@ -466,7 +491,12 @@ class FormServer:
                 self.timeout_timer = None
             if self._outcome is not None:
                 return
-            self.timeout_timer = threading.Timer(self.timeout, self._on_timeout)
+            # Timer.cancel() cannot stop a callback that has already started
+            # and is waiting for the lock, so each timer carries a generation
+            # and a stale callback is ignored.
+            self._timer_generation += 1
+            self.timeout_timer = threading.Timer(self.timeout, self._on_timeout,
+                                                 args=(self._timer_generation,))
             self.timeout_timer.daemon = True
             self.timeout_timer.start()
 
@@ -478,8 +508,12 @@ class FormServer:
     def note_recoverable_error(self) -> None:
         self.reset_timeout()
 
-    def _on_timeout(self) -> None:
-        if self.complete(OUTCOME_TIMEOUT):
+    def _on_timeout(self, generation: Optional[int] = None) -> None:
+        with self._lock:
+            if generation is not None and generation != self._timer_generation:
+                return  # a reset replaced this timer while its callback was pending
+            completed = self._complete_locked(OUTCOME_TIMEOUT, None, None)
+        if completed:
             self.release()
 
     # -- uploads ---------------------------------------------------------
@@ -487,6 +521,8 @@ class FormServer:
     def get_upload_dir(self) -> str:
         """Return the upload directory, creating a temporary one on first use."""
         with self._lock:
+            if self._outcome is not None:
+                raise SessionFinished('session already completed')
             if self.upload_dir is None:
                 self.upload_dir = tempfile.mkdtemp(prefix='readwebform_')
                 self._created_upload_dir = True
