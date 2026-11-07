@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -182,3 +183,175 @@ class TestFilenames:
         with open(file_metadata['doc']['path'], 'rb') as f:
             assert f.read() == b'hello\n\n'
         os.unlink(file_metadata['doc']['path'])
+
+
+def post_fields(server, fields, timeout=3):
+    data = urllib.parse.urlencode({'_csrf_token': server.csrf_token, **fields}).encode()
+    return urllib.request.urlopen(urllib.request.Request(server.get_url(), data=data), timeout=timeout)
+
+
+class TestLifecycle:
+    def test_listener_is_closed_after_success(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        with Running(server) as run:
+            port = server.server.server_address[1]
+            post_fields(server, {'a': '1'})
+            success, _, _, _ = run.wait()
+        assert success
+        assert server.server.socket.fileno() == -1
+        # The port can be bound again immediately
+        with socket.socket() as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('127.0.0.1', port))
+
+    def test_listener_is_closed_after_timeout(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.5)
+        success, _, _, cancelled = server.serve()
+        assert not success and not cancelled
+        assert server.timed_out
+        assert server.server.socket.fileno() == -1
+
+    def test_second_submission_gets_410(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        with Running(server) as run:
+            post_fields(server, {'a': 'first'})
+            try:
+                post_fields(server, {'a': 'second'})
+                second_status = 200
+            except urllib.error.HTTPError as e:
+                second_status = e.code
+            except (urllib.error.URLError, ConnectionError, OSError):
+                second_status = None  # server already gone: also acceptable
+            success, form_data, _, _ = run.wait()
+        assert success
+        assert form_data.fields['a'] == 'first'
+        assert second_status in (410, None)
+
+    def test_no_temp_dir_created_without_uploads(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        with Running(server) as run:
+            post_fields(server, {'a': '1'})
+            run.wait()
+        assert server.upload_dir is None
+
+    def test_temp_dir_removed_on_timeout(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.3)
+        server.serve()
+        assert server.upload_dir is None or not os.path.exists(server.upload_dir)
+
+    def test_explicit_upload_dir_is_used(self, tmp_path):
+        target = tmp_path / 'uploads'
+        server = make_server('<form enctype="multipart/form-data">'
+                             '<input type="file" name="doc"><button>Go</button></form>',
+                             upload_dir=str(target))
+        with Running(server) as run:
+            body = multipart_body('B1', server.csrf_token, [('doc', 'a.txt', 'A')])
+            req = urllib.request.Request(server.get_url(), data=body,
+                                         headers={'Content-Type': 'multipart/form-data; boundary=B1'})
+            urllib.request.urlopen(req, timeout=3)
+            success, _, file_metadata, _ = run.wait()
+        assert success
+        assert file_metadata['doc']['path'] == str(target / 'a.txt')
+        assert target.is_dir()
+
+    def test_external_stop_returns_promptly(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=30)
+        start = time.monotonic()
+        with Running(server) as run:
+            server.shutdown_event.set()
+            result = run.wait()
+        assert time.monotonic() - start < 3
+        assert result == (False, None, {}, False)
+        assert server.outcome == 'stopped'
+
+
+class TestConcurrentServers:
+    def test_two_servers_in_one_process_are_independent(self):
+        a = make_server('<form><input name="a"><button>Go</button></form>')
+        b = make_server('<form><input name="b"><button>Go</button></form>')
+        with Running(a) as run_a, Running(b) as run_b:
+            page_a = urllib.request.urlopen(a.get_url(), timeout=3).read().decode()
+            page_b = urllib.request.urlopen(b.get_url(), timeout=3).read().decode()
+            assert a.csrf_token in page_a and b.csrf_token not in page_a
+            assert b.csrf_token in page_b and a.csrf_token not in page_b
+
+            # A's token is rejected by B
+            data = urllib.parse.urlencode({'_csrf_token': a.csrf_token, 'b': 'x'}).encode()
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(urllib.request.Request(b.get_url(), data=data), timeout=3)
+            assert exc.value.code == 403
+
+            post_fields(b, {'b': 'only b'})
+            success_b, data_b, _, _ = run_b.wait()
+            assert success_b and data_b.fields == {'b': 'only b'}
+            assert not a.shutdown_event.is_set()
+
+            post_fields(a, {'a': 'only a'})
+            success_a, data_a, _, _ = run_a.wait()
+            assert success_a and data_a.fields == {'a': 'only a'}
+
+
+class TestIPv6:
+    def test_bind_to_ipv6_loopback(self):
+        try:
+            probe = socket.socket(socket.AF_INET6)
+            probe.bind(('::1', 0))
+            probe.close()
+        except OSError:
+            pytest.skip('IPv6 loopback not available')
+
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        server.host = '::1'
+        with Running(server) as run:
+            assert server.get_url().startswith('http://[::1]:')
+            page = urllib.request.urlopen(server.get_url(), timeout=3).read().decode()
+            assert server.csrf_token in page
+            post_fields(server, {'a': '1'})
+            success, _, _, _ = run.wait()
+        assert success
+
+
+class TestIdleConnections:
+    def test_idle_http_connection_does_not_block_others(self):
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        with Running(server) as run:
+            port = server.server.server_address[1]
+            idle = socket.create_connection(('127.0.0.1', port))  # connect, send nothing
+            time.sleep(0.2)
+            start = time.monotonic()
+            page = urllib.request.urlopen(server.get_url(), timeout=3).read().decode()
+            assert server.csrf_token in page
+            assert time.monotonic() - start < 2
+            post_fields(server, {'a': '1'})
+            success, _, _, _ = run.wait()
+            idle.close()
+        assert success
+
+    def test_idle_tls_connection_does_not_block_others(self, tmp_path):
+        pytest.importorskip('cryptography')
+        import ssl
+
+        from tests.test_https import generate_self_signed_cert
+        cert_pem, key_pem = generate_self_signed_cert('localhost')
+        cert_path, key_path = str(tmp_path / 'cert.pem'), str(tmp_path / 'key.pem')
+        (tmp_path / 'cert.pem').write_bytes(cert_pem)
+        (tmp_path / 'key.pem').write_bytes(key_pem)
+        server = make_server('<form><input name="a"><button>Go</button></form>',
+                             cert_file=cert_path, key_file=key_path)
+        with Running(server) as run:
+            port = server.server.server_address[1]
+            idle = socket.create_connection(('127.0.0.1', port))  # never handshakes
+            time.sleep(0.2)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            start = time.monotonic()
+            page = urllib.request.urlopen(server.get_url(), timeout=3, context=ctx).read().decode()
+            assert server.csrf_token in page
+            assert time.monotonic() - start < 2
+            data = urllib.parse.urlencode({'_csrf_token': server.csrf_token, 'a': '1'}).encode()
+            urllib.request.urlopen(urllib.request.Request(server.get_url(), data=data),
+                                   timeout=3, context=ctx)
+            success, _, _, _ = run.wait()
+            idle.close()
+        assert success
