@@ -8,7 +8,7 @@ cgi.FieldStorage module.
 import os
 import re
 import urllib.parse
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 
 class FormParseError(ValueError):
@@ -39,8 +39,8 @@ class FormData:
     """
 
     def __init__(self):
-        self.fields: Dict[str, Union[str, List[str]]] = {}
-        self.files: Dict[str, Union[UploadedFile, List[UploadedFile]]] = {}
+        self.fields: dict[str, Union[str, list[str]]] = {}
+        self.files: dict[str, Union[UploadedFile, list[UploadedFile]]] = {}
 
     def add_field(self, name: str, value: str) -> None:
         """Add a field value, converting to a list if the name already exists."""
@@ -219,7 +219,7 @@ _PARAM_RE = re.compile(
 )
 
 
-def parse_header_params(header: str) -> Dict[str, str]:
+def parse_header_params(header: str) -> dict[str, str]:
     """
     Parse the ``; key=value`` parameters of a header such as Content-Disposition.
 
@@ -234,7 +234,7 @@ def parse_header_params(header: str) -> Dict[str, str]:
     Returns:
         Dict of lower-cased parameter names to values
     """
-    params: Dict[str, str] = {}
+    params: dict[str, str] = {}
     for match in _PARAM_RE.finditer(header):
         key = match.group(1).lower()
         if match.group(2) is not None:
@@ -263,7 +263,7 @@ def _decode_rfc5987(value: str) -> str:
     return urllib.parse.unquote(value, errors='replace')
 
 
-def split_multipart_body(body: bytes, boundary: str) -> List[bytes]:
+def split_multipart_body(body: bytes, boundary: str) -> list[bytes]:
     """
     Split a multipart body into its parts (headers and content, undecoded).
 
@@ -294,7 +294,7 @@ def split_multipart_body(body: bytes, boundary: str) -> List[bytes]:
     return parts
 
 
-def parse_part(part: bytes) -> Tuple[Dict[str, str], bytes]:
+def parse_part(part: bytes) -> tuple[dict[str, str], bytes]:
     """
     Parse a single multipart part into headers and content.
 
@@ -315,7 +315,7 @@ def parse_part(part: bytes) -> Tuple[Dict[str, str], bytes]:
     else:
         header_data, content = part, b''
 
-    headers: Dict[str, str] = {}
+    headers: dict[str, str] = {}
     for line in header_data.decode('utf-8', errors='replace').splitlines():
         if ':' not in line:
             continue

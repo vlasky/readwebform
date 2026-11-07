@@ -2,13 +2,12 @@
 High-level Python API for readwebform.
 """
 
-from typing import Optional, Dict, List, Any, Union, Literal
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
+from typing import Any, Literal, Optional, Union
 
-from .server import FormServer
-from .parser import wrap_html_fragment, inject_csrf_token, validate_html
 from .forms import generate_form_html_from_dicts
-
+from .parser import inject_csrf_token, validate_html, wrap_html_fragment
+from .server import FormServer
 
 # Valid field types
 FieldType = Literal[
@@ -49,18 +48,18 @@ class Field:
     step: Optional[Union[int, float]] = None
     rows: Optional[int] = None
     cols: Optional[int] = None
-    options: Optional[List[str]] = None
+    options: Optional[list[str]] = None
     accept: Optional[str] = None
     multiple: bool = False
     pattern: Optional[str] = None
-    value: Optional[Union[str, int, float, List[str]]] = None
+    value: Optional[Union[str, int, float, list[str]]] = None
     checked: bool = False
     minlength: Optional[int] = None
     maxlength: Optional[int] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert Field to dictionary format for internal use."""
-        result = {'name': self.name, 'type': self.type}
+        result: dict[str, Any] = {'name': self.name, 'type': self.type}
 
         if self.label is not None:
             result['label'] = self.label
@@ -147,8 +146,8 @@ class FormResult:
             print(f"Form failed: {result.error}")
     """
     success: bool
-    fields: Optional[Dict[str, Union[str, List[str]]]] = None
-    files: Optional[Dict[str, Union[UploadedFile, List[UploadedFile]]]] = None
+    fields: Optional[dict[str, Union[str, list[str]]]] = None
+    files: Optional[dict[str, Union[UploadedFile, list[UploadedFile]]]] = None
     error: Optional[str] = None
 
 
@@ -240,7 +239,7 @@ def read_webform(
     # Convert to result object
     if success:
         # Convert file metadata dicts to UploadedFile objects
-        uploaded_files: Dict[str, Union[UploadedFile, List[UploadedFile]]] = {}
+        uploaded_files: dict[str, Union[UploadedFile, list[UploadedFile]]] = {}
         for name, meta in (file_metadata or {}).items():
             if isinstance(meta, list):
                 uploaded_files[name] = [UploadedFile(**m) for m in meta]
@@ -258,7 +257,7 @@ def read_webform(
 
 
 def read_webform_fields(
-    fields: List[Union[Field, Dict[str, Any]]],
+    fields: list[Union[Field, dict[str, Any]]],
     title: Optional[str] = None,
     text: Optional[str] = None,
     timeout: int = 300,
@@ -274,7 +273,8 @@ def read_webform_fields(
     Args:
         fields: List of field specifications. Each can be either:
             - A Field dataclass instance (recommended, provides IDE support)
-            - A dict with keys: name, type, label, required, placeholder, min, max, step, rows, cols, options, accept
+            - A dict with the same keys as Field (name, type, label, required,
+              placeholder, value, checked, min, max, step, rows, cols, options, ...)
         title: Page title (optional)
         text: Instructional text above form (optional)
         timeout: Maximum seconds to wait (default: 300)

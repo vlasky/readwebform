@@ -3,13 +3,8 @@ Tests for declarative form generation.
 """
 
 import pytest
-from readwebform.forms import (
-    FieldSpec,
-    generate_form_html,
-    generate_field_html,
-    escape_html,
-    escape_attr
-)
+
+from readwebform.forms import FieldSpec, escape_attr, escape_html, generate_field_html, generate_form_html
 
 
 class TestFieldSpec:

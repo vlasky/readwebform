@@ -3,13 +3,8 @@ Tests for output formatting.
 """
 
 import json
-import pytest
-from readwebform.output import (
-    format_json_output,
-    format_env_output,
-    is_valid_var_name,
-    sanitize_env_value
-)
+
+from readwebform.output import format_env_output, format_json_output, is_valid_var_name, sanitize_env_value
 
 
 class TestFormatJSONOutput:
@@ -223,6 +218,7 @@ class TestRepeatedFieldsAndNames:
     def test_envfile_is_owner_only(self, tmp_path):
         import os
         import stat
+
         from readwebform.output import write_env_file
         path = tmp_path / 'secrets.env'
         write_env_file(str(path), {'token': 's3cret'})

@@ -7,7 +7,7 @@ import os
 import re
 import shlex
 import sys
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 DEFAULT_ENV_PREFIX = 'WEBFORM_'
 
@@ -15,8 +15,8 @@ _VAR_NAME_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 
 def format_json_output(
-    fields: Optional[Dict[str, Any]],
-    files: Optional[Dict[str, Any]],
+    fields: Optional[dict[str, Any]],
+    files: Optional[dict[str, Any]],
     success: bool = True,
     error: Optional[str] = None
 ) -> str:
@@ -53,9 +53,9 @@ def env_var_name(name: str, prefix: str = DEFAULT_ENV_PREFIX) -> str:
 
 
 def format_env_output(
-    fields: Dict[str, Union[str, List[str]]],
+    fields: dict[str, Union[str, list[str]]],
     prefix: str = DEFAULT_ENV_PREFIX,
-    files: Optional[Dict[str, Any]] = None
+    files: Optional[dict[str, Any]] = None
 ) -> str:
     """
     Format form data as shell ``export`` statements.
@@ -76,9 +76,9 @@ def format_env_output(
     Returns:
         Shell export statements preceded by a warning comment
     """
-    lines: List[str] = []
-    seen: Dict[str, str] = {}
-    skipped: List[str] = []
+    lines: list[str] = []
+    seen: dict[str, str] = {}
+    skipped: list[str] = []
 
     def emit(var_name: str, value: str, source: str) -> None:
         if not is_valid_var_name(var_name):
@@ -135,9 +135,9 @@ def sanitize_env_value(value: str) -> str:
     return ''.join(ch for ch in value if ch == '\t' or not (ord(ch) < 32 or ord(ch) == 127))
 
 
-def write_env_file(filepath: str, fields: Dict[str, Union[str, List[str]]],
+def write_env_file(filepath: str, fields: dict[str, Union[str, list[str]]],
                    prefix: str = DEFAULT_ENV_PREFIX,
-                   files: Optional[Dict[str, Any]] = None) -> None:
+                   files: Optional[dict[str, Any]] = None) -> None:
     """
     Write environment variable exports to a file readable only by the owner.
 

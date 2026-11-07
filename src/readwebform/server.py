@@ -34,11 +34,17 @@ import ssl
 import sys
 import tempfile
 import threading
-from typing import Callable, Dict, Optional, Set, Tuple
+from typing import Optional, cast
 
 from .browser import launch_browser
-from .multipart import (FormData, FormParseError, SizeLimitExceeded,
-                        parse_multipart, parse_urlencoded, save_uploaded_file)
+from .multipart import (
+    FormData,
+    FormParseError,
+    SizeLimitExceeded,
+    parse_multipart,
+    parse_urlencoded,
+    save_uploaded_file,
+)
 
 # Maximum request body size when no limit is configured (prevents memory exhaustion)
 DEFAULT_MAX_BODY_SIZE = 20 * 1024 * 1024  # 20 MB
@@ -61,12 +67,12 @@ class _FormHTTPServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address: Tuple[str, int], session: 'FormServer',
+    def __init__(self, address: tuple[str, int], session: 'FormServer',
                  ssl_context: Optional[ssl.SSLContext]):
         self.session = session
         self.ssl_context = ssl_context
         self.address_family = socket.AF_INET6 if ':' in address[0] else socket.AF_INET
-        self._connections: Set[socket.socket] = set()
+        self._connections: set[socket.socket] = set()
         self._connections_lock = threading.Lock()
         super().__init__(address, FormServerHandler)
 
@@ -74,8 +80,8 @@ class _FormHTTPServer(http.server.ThreadingHTTPServer):
         # HTTPServer.server_bind() calls socket.getfqdn(), which can stall for
         # seconds on hosts with slow reverse DNS. We never use server_name.
         socketserver.TCPServer.server_bind(self)
-        self.server_name = self.server_address[0]
-        self.server_port = self.server_address[1]
+        self.server_name = str(self.server_address[0])
+        self.server_port = int(self.server_address[1])
 
     def track_connection(self, conn: socket.socket) -> None:
         with self._connections_lock:
@@ -118,15 +124,18 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
     timeout = CONNECTION_TIMEOUT
     server_version = 'readwebform'
     sys_version = ''
-    server: _FormHTTPServer
+
+    @property
+    def form_server(self) -> _FormHTTPServer:
+        return cast(_FormHTTPServer, self.server)
 
     @property
     def session(self) -> 'FormServer':
-        return self.server.session
+        return self.form_server.session
 
     def setup(self):
-        self.server.track_connection(self.request)
-        ctx = self.server.ssl_context
+        self.form_server.track_connection(self.request)
+        ctx = self.form_server.ssl_context
         if ctx is not None:
             # Handshake here, on the connection thread and under the socket
             # timeout, rather than inside accept() on the serving thread.
@@ -140,8 +149,8 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         try:
             super().finish()
         finally:
-            self.server.untrack_connection(self.request)
-            if self.server.ssl_context is not None:
+            self.form_server.untrack_connection(self.request)
+            if self.form_server.ssl_context is not None:
                 try:
                     self.request.close()
                 except OSError:
@@ -245,7 +254,7 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
                 session.release()
             return
 
-        file_metadata: Dict = {}
+        file_metadata: dict = {}
         saved_paths = []
         try:
             for name, uploaded_file in form_data.iter_files():
@@ -495,6 +504,7 @@ class FormServer:
     # -- serving ---------------------------------------------------------
 
     def _build_ssl_context(self) -> ssl.SSLContext:
+        assert self.cert_file is not None and self.key_file is not None
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         try:
             context.load_cert_chain(certfile=self.cert_file, keyfile=self.key_file)
@@ -512,7 +522,7 @@ class FormServer:
         return f'{protocol}://{url_host}:{port}{self.endpoint}'
 
     def serve(self, launch_browser_path: Optional[str] = None,
-              url_file: Optional[str] = None) -> Tuple[bool, Optional[FormData], dict, bool]:
+              url_file: Optional[str] = None) -> tuple[bool, Optional[FormData], dict, bool]:
         """
         Start the server and wait for a submission, cancellation, or timeout.
 
@@ -579,8 +589,10 @@ class FormServer:
         return False, None, {}, self.cancelled
 
     def _run_server(self) -> None:
+        server = self.server
+        assert server is not None
         try:
-            self.server.serve_forever(poll_interval=0.25)
+            server.serve_forever(poll_interval=0.25)
         except OSError as e:
             if not self.shutdown_event.is_set():
                 print(f'Server error: {e}', file=sys.stderr)

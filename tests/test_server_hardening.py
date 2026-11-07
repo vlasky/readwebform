@@ -115,7 +115,11 @@ class TestMultipleFiles:
         assert success
         paths = [m['path'] for m in file_metadata['docs']]
         assert len(set(paths)) == 2
-        contents = sorted(open(p).read() for p in paths)
+        contents = []
+        for p in paths:
+            with open(p) as f:
+                contents.append(f.read())
+        contents.sort()
         assert contents == ['first', 'second']
         for p in paths:
             os.unlink(p)

@@ -5,8 +5,7 @@ Tests for the Python API, including Field dataclass.
 import pytest
 
 from readwebform import Field, FormResult, UploadedFile
-from readwebform.api import read_webform_fields
-from readwebform.forms import generate_form_html_from_dicts, dict_to_fieldspec
+from readwebform.forms import dict_to_fieldspec, generate_form_html_from_dicts
 
 
 class TestFieldDataclass:

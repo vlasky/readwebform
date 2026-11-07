@@ -3,14 +3,15 @@ Tests for multipart form data parsing.
 """
 
 import pytest
+
 from readwebform.multipart import (
-    parse_size_limit,
-    parse_multipart,
-    parse_urlencoded,
-    extract_boundary,
-    sanitize_filename,
     FormData,
-    UploadedFile
+    UploadedFile,
+    extract_boundary,
+    parse_multipart,
+    parse_size_limit,
+    parse_urlencoded,
+    sanitize_filename,
 )
 
 

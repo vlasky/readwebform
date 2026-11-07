@@ -2,13 +2,12 @@
 Tests for HTML parsing and validation.
 """
 
-import pytest
 from readwebform.parser import (
-    validate_html,
-    is_external_url,
+    escape_html,
     inject_csrf_token,
+    is_external_url,
+    validate_html,
     wrap_html_fragment,
-    escape_html
 )
 
 

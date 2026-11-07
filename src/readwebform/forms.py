@@ -4,7 +4,7 @@ Declarative form generation for readwebform.
 
 import html as html_mod
 import urllib.parse
-from typing import Dict, List, Optional
+from typing import Optional
 
 from .parser import render_page
 
@@ -28,7 +28,7 @@ class FieldSpec:
     """Represents a parsed field specification."""
 
     def __init__(self, name: str, field_type: str, label: Optional[str] = None,
-                 options: Optional[Dict[str, str]] = None):
+                 options: Optional[dict[str, str]] = None):
         self.name = name
         self.field_type = field_type
         self.label = label or name
@@ -58,7 +58,7 @@ class FieldSpec:
         name = parts[0].strip()
         field_type = parts[1].strip().lower()
         label = None
-        options: Dict[str, str] = {}
+        options: dict[str, str] = {}
 
         if not name:
             raise ValueError(f'Invalid field spec: {spec} (field name is empty)')
@@ -77,12 +77,12 @@ class FieldSpec:
         return cls(name, field_type, label, options)
 
     @staticmethod
-    def _parse_options(options_str: str) -> Dict[str, str]:
+    def _parse_options(options_str: str) -> dict[str, str]:
         """Parse an options string into a dictionary."""
-        options: Dict[str, str] = {}
+        options: dict[str, str] = {}
         last_key: Optional[str] = None
-        for segment in options_str.split(','):
-            segment = segment.strip()
+        for raw_segment in options_str.split(','):
+            segment = raw_segment.strip()
             if not segment:
                 continue
 
@@ -106,7 +106,7 @@ class FieldSpec:
         return name in self.options
 
 
-def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True,
+def generate_form_html(fields: list[FieldSpec], add_submit_button: bool = True,
                        add_cancel_button: bool = True, cancel_label: str = 'Cancel') -> str:
     """
     Generate an HTML form from field specifications.
@@ -165,8 +165,8 @@ def generate_field_html(field: FieldSpec) -> str:
     return label_html + '\n' + _generate_input(field)
 
 
-def _common_attrs(field: FieldSpec) -> Dict[str, Optional[str]]:
-    attrs: Dict[str, Optional[str]] = {}
+def _common_attrs(field: FieldSpec) -> dict[str, Optional[str]]:
+    attrs: dict[str, Optional[str]] = {}
     for flag in ('required', 'readonly', 'disabled', 'autofocus'):
         if field.has_flag(flag):
             attrs[flag] = None
@@ -175,7 +175,7 @@ def _common_attrs(field: FieldSpec) -> Dict[str, Optional[str]]:
 
 def _generate_input(field: FieldSpec) -> str:
     """Generate HTML for <input> elements."""
-    attrs: Dict[str, Optional[str]] = {
+    attrs: dict[str, Optional[str]] = {
         'type': field.field_type,
         'name': field.name,
         'id': field.name,
@@ -198,7 +198,7 @@ def _generate_input(field: FieldSpec) -> str:
 
 def _generate_textarea(field: FieldSpec) -> str:
     """Generate HTML for <textarea> elements."""
-    attrs: Dict[str, Optional[str]] = {
+    attrs: dict[str, Optional[str]] = {
         'name': field.name,
         'id': field.name,
     }
@@ -213,12 +213,12 @@ def _generate_textarea(field: FieldSpec) -> str:
     return '    ' + build_tag('textarea', attrs) + content + '</textarea>'
 
 
-def _option_values(field: FieldSpec) -> List[str]:
+def _option_values(field: FieldSpec) -> list[str]:
     raw = field.options.get('options', '')
     return [o.strip() for o in raw.split('|')] if raw else []
 
 
-def _selected_values(field: FieldSpec) -> List[str]:
+def _selected_values(field: FieldSpec) -> list[str]:
     value = field.options.get('value')
     if value is None:
         return []
@@ -229,7 +229,7 @@ def _selected_values(field: FieldSpec) -> List[str]:
 
 def _generate_select(field: FieldSpec) -> str:
     """Generate HTML for <select> elements."""
-    attrs: Dict[str, Optional[str]] = {
+    attrs: dict[str, Optional[str]] = {
         'name': field.name,
         'id': field.name,
     }
@@ -248,7 +248,7 @@ def _generate_select(field: FieldSpec) -> str:
 
 def _generate_checkbox(field: FieldSpec) -> str:
     """Generate HTML for a checkbox with a trailing label."""
-    attrs: Dict[str, Optional[str]] = {
+    attrs: dict[str, Optional[str]] = {
         'type': 'checkbox',
         'name': field.name,
         'id': field.name,
@@ -269,7 +269,7 @@ def _generate_radio_group(field: FieldSpec) -> str:
     lines = ['    <fieldset>', f'        <legend>{escape_html(field.label)}</legend>']
     for i, option in enumerate(_option_values(field)):
         option_id = f'{field.name}_{i}'
-        attrs: Dict[str, Optional[str]] = {
+        attrs: dict[str, Optional[str]] = {
             'type': 'radio',
             'name': field.name,
             'id': option_id,
@@ -287,7 +287,7 @@ def _generate_radio_group(field: FieldSpec) -> str:
     return '\n'.join(lines)
 
 
-def build_tag(tag: str, attrs: Dict[str, Optional[str]]) -> str:
+def build_tag(tag: str, attrs: dict[str, Optional[str]]) -> str:
     """
     Build an HTML start tag with attributes.
 
@@ -323,7 +323,7 @@ def escape_attr(text: Optional[str]) -> str:
     return html_mod.escape(text, quote=True)
 
 
-def dict_to_fieldspec(field_dict: Dict) -> FieldSpec:
+def dict_to_fieldspec(field_dict: dict) -> FieldSpec:
     """
     Convert a field dictionary (as used by the Python API) to a FieldSpec.
 
@@ -346,7 +346,7 @@ def dict_to_fieldspec(field_dict: Dict) -> FieldSpec:
 
     label = field_dict.get('label')
 
-    options: Dict[str, str] = {}
+    options: dict[str, str] = {}
     for key in ('placeholder', 'min', 'max', 'step', 'accept', 'pattern',
                 'rows', 'cols', 'minlength', 'maxlength', 'autocomplete'):
         if field_dict.get(key) is not None:
@@ -374,7 +374,7 @@ def dict_to_fieldspec(field_dict: Dict) -> FieldSpec:
 
 
 def generate_form_html_from_dicts(
-    fields: List[Dict],
+    fields: list[dict],
     title: Optional[str] = None,
     text: Optional[str] = None,
     add_submit: bool = True,

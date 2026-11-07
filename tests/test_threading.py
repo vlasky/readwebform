@@ -7,13 +7,13 @@ thread and the main server thread.
 
 import threading
 import time
-import urllib.request
 import urllib.parse
+import urllib.request
 
 import pytest
 
-from readwebform.server import FormServer
 from readwebform.parser import inject_csrf_token, wrap_html_fragment
+from readwebform.server import FormServer
 
 
 class TestThreadingSynchronization:
@@ -128,7 +128,7 @@ class TestThreadingSynchronization:
 
             result = {'success': False, 'iteration': None}
 
-            def run_server():
+            def run_server(server=server, result=result):
                 success, form_data, _, _ = server.serve()
                 result['success'] = success
                 if form_data:
@@ -163,7 +163,7 @@ class TestThreadingSynchronization:
 
         # All iterations should succeed
         if failures:
-            pytest.fail(f"Failures in repeated submissions:\n" + "\n".join(failures))
+            pytest.fail("Failures in repeated submissions:\n" + "\n".join(failures))
 
     def test_main_thread_sees_handler_thread_updates(self):
         """Verify that updates from handler thread are visible to main thread.
@@ -315,7 +315,7 @@ class TestThreadingSynchronization:
 
             result = {'success': False}
 
-            def run_server():
+            def run_server(server=server, result=result):
                 success, _, _, _ = server.serve()
                 result['success'] = success
 
@@ -471,7 +471,7 @@ class TestThreadingEdgeCases:
             '_csrf_token': server.csrf_token
         }).encode('utf-8')
 
-        submission_time = time.monotonic()
+        time.monotonic()
         req = urllib.request.Request(url, data=data, method='POST')
         response = urllib.request.urlopen(req, timeout=2)
         assert response.status == 200

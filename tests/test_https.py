@@ -6,6 +6,7 @@ for testing HTTPS functionality without requiring user-provided certificates.
 """
 
 import datetime
+import ipaddress
 import os
 import socket
 import ssl
@@ -19,8 +20,8 @@ import urllib.request
 
 import pytest
 
-from readwebform.server import FormServer
 from readwebform.parser import inject_csrf_token, wrap_html_fragment
+from readwebform.server import FormServer
 
 
 def generate_self_signed_cert(hostname='localhost'):
@@ -30,10 +31,9 @@ def generate_self_signed_cert(hostname='localhost'):
         Tuple of (cert_pem, key_pem) as bytes
     """
     from cryptography import x509
-    from cryptography.x509.oid import NameOID
-    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
+    from cryptography.x509.oid import NameOID
 
     # Generate private key
     private_key = rsa.generate_private_key(
@@ -76,9 +76,6 @@ def generate_self_signed_cert(hostname='localhost'):
     )
 
     return cert_pem, key_pem
-
-
-import ipaddress
 
 
 @pytest.fixture
@@ -266,7 +263,7 @@ class TestHTTPSServer:
             f'------{boundary}\r\n'
             f'Content-Disposition: form-data; name="document"; filename="secret.txt"\r\n'
             f'Content-Type: text/plain\r\n\r\n'
-        ).encode('utf-8') + file_content + f'\r\n------{boundary}--\r\n'.encode('utf-8')
+        ).encode() + file_content + f'\r\n------{boundary}--\r\n'.encode()
 
         # Create SSL context that doesn't verify self-signed cert
         ctx = ssl.create_default_context()

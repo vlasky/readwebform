@@ -6,13 +6,13 @@ These tests ensure the timeout mechanism works correctly in all scenarios.
 
 import threading
 import time
-import urllib.request
 import urllib.parse
+import urllib.request
 
 import pytest
 
-from readwebform.server import FormServer
 from readwebform.parser import inject_csrf_token, wrap_html_fragment
+from readwebform.server import FormServer
 
 
 class TestTimeoutBehavior:
@@ -112,7 +112,7 @@ class TestTimeoutBehavior:
             req = urllib.request.Request(url, method='GET')
             response = urllib.request.urlopen(req, timeout=1)
             assert response.status == 200, "Server should still be running after timeout reset"
-        except:
+        except Exception:
             pytest.fail("Server should still be running - timeout should have been reset")
 
         # Now wait for actual timeout (another second)
@@ -268,13 +268,13 @@ class TestTimeoutBehavior:
             time.sleep(0.01)
 
         # Access the form multiple times (should not reset timeout or interfere)
-        for i in range(3):
+        for _i in range(3):
             time.sleep(0.5)
             try:
                 req = urllib.request.Request(url, method='GET')
                 response = urllib.request.urlopen(req, timeout=1)
                 assert response.status == 200
-            except:
+            except Exception:
                 break  # Server may have shut down
 
         server_thread.join(timeout=3.0)
@@ -380,7 +380,7 @@ class TestTimeoutEdgeCases:
             f'------{boundary}\r\n'
             f'Content-Disposition: form-data; name="file"; filename="test.txt"\r\n'
             f'Content-Type: text/plain\r\n\r\n'
-        ).encode('utf-8') + file_content + f'\r\n------{boundary}--\r\n'.encode('utf-8')
+        ).encode() + file_content + f'\r\n------{boundary}--\r\n'.encode()
 
         req = urllib.request.Request(
             url,

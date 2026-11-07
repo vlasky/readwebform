@@ -6,7 +6,7 @@ import html as html_mod
 import re
 import sys
 from html.parser import HTMLParser
-from typing import List, Optional, Tuple
+from typing import Optional
 
 
 class FormDetector(HTMLParser):
@@ -27,7 +27,7 @@ class FormDetector(HTMLParser):
         # Position of the first form's start tag within the source
         self.form_start: Optional[int] = None
         self.form_tag_text: Optional[str] = None
-        self.form_attrs: List[Tuple[str, Optional[str]]] = []
+        self.form_attrs: list[tuple[str, Optional[str]]] = []
 
     def _index(self) -> int:
         lineno, offset = self.getpos()
@@ -45,12 +45,9 @@ class FormDetector(HTMLParser):
                 self.form_tag_text = self.get_starttag_text()
                 self.form_attrs = list(attrs)
 
-        if self.in_form and tag == 'input':
-            if (attrs_dict.get('type') or 'text').lower() == 'submit':
-                self.has_submit_button = True
-
-        if self.in_form and tag == 'button':
-            if (attrs_dict.get('type') or 'submit').lower() == 'submit':
+        if self.in_form and tag in ('input', 'button'):
+            default_type = 'text' if tag == 'input' else 'submit'
+            if (attrs_dict.get('type') or default_type).lower() == 'submit':
                 self.has_submit_button = True
 
     def handle_endtag(self, tag: str):
@@ -58,7 +55,7 @@ class FormDetector(HTMLParser):
             self.in_form = False
 
 
-def _line_starts(source: str) -> List[int]:
+def _line_starts(source: str) -> list[int]:
     """Character index at which each line starts; HTMLParser counts lines by '\\n'."""
     starts = [0]
     for i, ch in enumerate(source):
@@ -74,7 +71,7 @@ def _detect(html: str) -> FormDetector:
     return detector
 
 
-def validate_html(html: str, warn_no_submit: bool = True) -> Tuple[bool, Optional[str]]:
+def validate_html(html: str, warn_no_submit: bool = True) -> tuple[bool, Optional[str]]:
     """
     Validate that HTML contains exactly one form element.
 

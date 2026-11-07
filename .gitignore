@@ -138,3 +138,4 @@ Thumbs.db
 *.env
 vars.env
 /examples/output/
+uv.lock

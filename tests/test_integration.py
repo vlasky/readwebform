@@ -9,16 +9,14 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.request
 import urllib.parse
-from http.client import HTTPConnection
-from io import BytesIO
+import urllib.request
 
 import pytest
 
-from readwebform.server import FormServer
-from readwebform.parser import inject_csrf_token, wrap_html_fragment
 from readwebform.multipart import parse_size_limit
+from readwebform.parser import inject_csrf_token, wrap_html_fragment
+from readwebform.server import FormServer
 
 
 class TestServerIntegration:
@@ -170,7 +168,7 @@ class TestServerIntegration:
             f'------{boundary}\r\n'
             f'Content-Disposition: form-data; name="document"; filename="test.txt"\r\n'
             f'Content-Type: text/plain\r\n\r\n'
-        ).encode('utf-8') + file_content + f'\r\n------{boundary}--\r\n'.encode('utf-8')
+        ).encode() + file_content + f'\r\n------{boundary}--\r\n'.encode()
 
         req = urllib.request.Request(
             url,
@@ -275,7 +273,7 @@ class TestServerIntegration:
             f'------{boundary}\r\n'
             f'Content-Disposition: form-data; name="file"; filename="large.bin"\r\n'
             f'Content-Type: application/octet-stream\r\n\r\n'
-        ).encode('utf-8') + large_content + f'\r\n------{boundary}--\r\n'.encode('utf-8')
+        ).encode() + large_content + f'\r\n------{boundary}--\r\n'.encode()
 
         req = urllib.request.Request(
             url,
@@ -354,7 +352,7 @@ class TestServerIntegration:
             f'------{boundary}\r\n'
             f'Content-Disposition: form-data; name="file"; filename="file.bin"\r\n'
             f'Content-Type: application/octet-stream\r\n\r\n'
-        ).encode('utf-8') + content + f'\r\n------{boundary}--\r\n'.encode('utf-8')
+        ).encode() + content + f'\r\n------{boundary}--\r\n'.encode()
 
         req = urllib.request.Request(
             url,
@@ -489,11 +487,11 @@ class TestEndToEndScenarios:
             f'------{boundary}\r\n'
             f'Content-Disposition: form-data; name="file1"; filename="doc1.txt"\r\n'
             f'Content-Type: text/plain\r\n\r\n'
-        ).encode('utf-8') + file1_content + (
+        ).encode() + file1_content + (
             f'\r\n------{boundary}\r\n'
             f'Content-Disposition: form-data; name="file2"; filename="doc2.txt"\r\n'
             f'Content-Type: text/plain\r\n\r\n'
-        ).encode('utf-8') + file2_content + f'\r\n------{boundary}--\r\n'.encode('utf-8')
+        ).encode() + file2_content + f'\r\n------{boundary}--\r\n'.encode()
 
         req = urllib.request.Request(
             url,
@@ -750,7 +748,7 @@ class TestUrlFile:
             # Verify URL file was written
             assert os.path.exists(url_file), "URL file should exist"
 
-            with open(url_file, 'r') as f:
+            with open(url_file) as f:
                 url_content = f.read().strip()
 
             assert url_content.startswith('http://127.0.0.1:'), \
@@ -779,7 +777,6 @@ class TestUrlFile:
             url_file = f.name
 
         try:
-            result = {'url': None}
 
             def run_server():
                 server.serve(url_file=url_file)
@@ -794,7 +791,7 @@ class TestUrlFile:
             api_url = server.get_url()
 
             # Read URL from file
-            with open(url_file, 'r') as f:
+            with open(url_file) as f:
                 file_url = f.read().strip()
 
             assert file_url == api_url, \

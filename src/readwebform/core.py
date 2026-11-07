@@ -4,7 +4,6 @@ Core orchestration for readwebform: load, validate, serve, output.
 
 import sys
 import traceback
-from typing import Optional
 
 from .forms import FieldSpec, generate_form_html
 from .multipart import parse_size_limit
@@ -100,7 +99,7 @@ def run_readwebform(args) -> int:
             print('Form submission cancelled by user', file=sys.stderr)
             return EXIT_CANCELLED
 
-        if not success:
+        if not success or form_data is None:
             _emit_failure(args, 'timeout')
             print('Error: Timeout waiting for submission', file=sys.stderr)
             return EXIT_TIMEOUT
@@ -144,16 +143,16 @@ def load_html(args) -> str:
 
     if args.htmlfile is not None:
         try:
-            with open(args.htmlfile, 'r', encoding='utf-8') as f:
+            with open(args.htmlfile, encoding='utf-8') as f:
                 return f.read()
-        except FileNotFoundError:
-            raise InputError(f'File not found: {args.htmlfile}', EXIT_READ_ERROR)
-        except PermissionError:
-            raise InputError(f'Permission denied: {args.htmlfile}', EXIT_READ_ERROR)
-        except OSError as e:
-            raise InputError(f'Cannot read {args.htmlfile}: {e}', EXIT_READ_ERROR)
+        except FileNotFoundError as e:
+            raise InputError(f'File not found: {args.htmlfile}', EXIT_READ_ERROR) from e
+        except PermissionError as e:
+            raise InputError(f'Permission denied: {args.htmlfile}', EXIT_READ_ERROR) from e
         except UnicodeDecodeError as e:
-            raise InputError(f'{args.htmlfile} is not valid UTF-8: {e}', EXIT_READ_ERROR)
+            raise InputError(f'{args.htmlfile} is not valid UTF-8: {e}', EXIT_READ_ERROR) from e
+        except OSError as e:
+            raise InputError(f'Cannot read {args.htmlfile}: {e}', EXIT_READ_ERROR) from e
 
     if args.field:
         return generate_html_from_fields(
@@ -180,7 +179,7 @@ def generate_html_from_fields(field_specs: list, no_submit_button: bool,
         try:
             fields.append(FieldSpec.parse(spec))
         except ValueError as e:
-            raise InputError(str(e), EXIT_INVALID_HTML)
+            raise InputError(str(e), EXIT_INVALID_HTML) from e
 
     return generate_form_html(fields, add_submit_button=not no_submit_button,
                               add_cancel_button=not no_cancel_button, cancel_label=cancel_label)

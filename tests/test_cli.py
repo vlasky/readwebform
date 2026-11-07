@@ -3,6 +3,7 @@ Tests for CLI argument parsing.
 """
 
 import pytest
+
 from readwebform.cli import ReadWebFormArgumentParser
 
 
