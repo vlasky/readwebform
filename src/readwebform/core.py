@@ -1,29 +1,36 @@
 """
-Core orchestration for readwebform.
+Core orchestration for readwebform: load, validate, serve, output.
 """
 
 import sys
-import tempfile
+import traceback
 from typing import Optional
 
-from .parser import validate_html, inject_csrf_token, wrap_html_fragment
 from .forms import FieldSpec, generate_form_html
-from .server import FormServer
 from .multipart import parse_size_limit
-from .output import format_json_output, format_env_output, write_env_file
-from .browser import launch_browser
-
+from .output import format_env_output, format_json_output, write_env_file
+from .parser import inject_csrf_token, validate_html, wrap_html_fragment
+from .server import FormServer
 
 # Exit codes
 EXIT_SUCCESS = 0
 EXIT_INTERNAL_ERROR = 1
 EXIT_INVALID_HTML = 2
 EXIT_READ_ERROR = 3
-EXIT_BROWSER_LAUNCH_ERROR = 4
+EXIT_BROWSER_LAUNCH_ERROR = 4   # reserved: browser failures only warn
 EXIT_TIMEOUT = 5
-EXIT_UPLOAD_SIZE_EXCEEDED = 6
+EXIT_UPLOAD_SIZE_EXCEEDED = 6   # reserved: oversized uploads are recoverable (HTTP 413)
 EXIT_CANCELLED = 7
 EXIT_INVALID_ARGUMENT = 8
+EXIT_INTERRUPTED = 130
+
+
+class InputError(Exception):
+    """A problem with the form input that maps to a specific exit code."""
+
+    def __init__(self, message: str, exit_code: int):
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 def run_readwebform(args) -> int:
@@ -37,39 +44,29 @@ def run_readwebform(args) -> int:
         Exit code
     """
     try:
-        # Step 1: Load HTML content
-        html = load_html(args)
-        if html is None:
-            return EXIT_READ_ERROR
+        try:
+            html = load_html(args)
+        except InputError as e:
+            print(f'Error: {e}', file=sys.stderr)
+            return e.exit_code
 
-        # Step 2: Wrap with title and text if needed
         html = wrap_html_fragment(html, args.title, args.text)
 
-        # Step 3: Validate HTML
         warn_no_submit = not (args.field and not args.no_submit_button)
         valid, error = validate_html(html, warn_no_submit=warn_no_submit)
         if not valid:
             print(f'Error: {error}', file=sys.stderr)
             return EXIT_INVALID_HTML
 
-        # Step 4: Parse size limits
         try:
-            max_file_size = parse_size_limit(args.max_file_size) if args.max_file_size else None
+            max_file_size = parse_size_limit(args.max_file_size)
+            max_total_size = parse_size_limit(args.max_total_size)
         except ValueError as e:
-            print(f'Error: Invalid --max-file-size: {e}', file=sys.stderr)
-            print('       Use format like: 5M, 200K, 1G, or plain bytes', file=sys.stderr)
+            print(f'Error: Invalid size limit: {e}', file=sys.stderr)
             return EXIT_INVALID_ARGUMENT
 
-        try:
-            max_total_size = parse_size_limit(args.max_total_size) if args.max_total_size else None
-        except ValueError as e:
-            print(f'Error: Invalid --max-total-size: {e}', file=sys.stderr)
-            print('       Use format like: 20M, 500K, 1G, or plain bytes', file=sys.stderr)
-            return EXIT_INVALID_ARGUMENT
-
-        # Step 5: Create server
         server = FormServer(
-            html='',  # We'll set this after CSRF injection
+            html='',  # set after CSRF injection
             host=args.host,
             port=args.port,
             max_file_size=max_file_size,
@@ -77,160 +74,120 @@ def run_readwebform(args) -> int:
             timeout=args.timeout,
             reset_timeout_on_error=args.reset_timeout_on_error,
             cert_file=getattr(args, 'cert', None),
-            key_file=getattr(args, 'key', None)
+            key_file=getattr(args, 'key', None),
+            upload_dir=getattr(args, 'upload_dir', None),
         )
+        server.html = inject_csrf_token(html, server.csrf_token, server.endpoint)
 
-        # Step 6: Inject CSRF token into HTML
-        html_with_csrf = inject_csrf_token(html, server.csrf_token, server.endpoint)
-        server.html = html_with_csrf
-
-        # Step 7: Warn if binding to all interfaces without authentication
         if args.host in ('0.0.0.0', '::'):
-            print(
-                'Warning: Binding to all interfaces. Form will be accessible from other machines.',
-                file=sys.stderr
-            )
-            print(
-                '         Consider using --host 127.0.0.1 for local-only access.',
-                file=sys.stderr
-            )
+            print('Warning: Binding to all interfaces. The form will be reachable from other machines.',
+                  file=sys.stderr)
+            print('         Consider --host 127.0.0.1 for local-only access.', file=sys.stderr)
 
-        # Step 8: Prepare browser launch callback if requested
-        # args.launch_browser: None = not specified, '' = system default, path = custom browser
-        browser_path = args.launch_browser
-
-        # Step 9: Start server and wait for submission
-        # Browser is launched after server is ready (inside serve() method)
-        success, form_data, file_metadata, cancelled = server.serve(
-            launch_browser_path=browser_path,
-            url_file=getattr(args, 'url_file', None)
-        )
+        # args.launch_browser: None = not requested, '' = system default, path = custom browser
+        try:
+            success, form_data, file_metadata, cancelled = server.serve(
+                launch_browser_path=args.launch_browser,
+                url_file=getattr(args, 'url_file', None)
+            )
+        except KeyboardInterrupt:
+            _emit_failure(args, 'interrupted')
+            print('\nInterrupted by user', file=sys.stderr)
+            return EXIT_INTERRUPTED
 
         if cancelled:
-            # Output JSON with error on cancellation (unless using env output)
-            if not args.print_env:
-                json_output = format_json_output({}, {}, success=False, error='cancelled')
-                print(json_output)
+            _emit_failure(args, 'cancelled')
             print('Form submission cancelled by user', file=sys.stderr)
             return EXIT_CANCELLED
 
         if not success:
-            # Output JSON with error on timeout (unless using env output)
-            if not args.print_env:
-                json_output = format_json_output({}, {}, success=False, error='timeout')
-                print(json_output)
+            _emit_failure(args, 'timeout')
             print('Error: Timeout waiting for submission', file=sys.stderr)
             return EXIT_TIMEOUT
 
-        # Step 9: Output results
+        env_prefix = getattr(args, 'env_prefix', 'WEBFORM_')
+        if args.envfile:
+            write_env_file(args.envfile, form_data.fields, env_prefix, file_metadata)
         if args.print_env:
-            # Print environment variables to stdout
-            env_output = format_env_output(form_data.fields)
-            print(env_output)
-        elif args.envfile:
-            # Write to envfile
-            write_env_file(args.envfile, form_data.fields)
-            # Also output JSON to stdout
-            json_output = format_json_output(form_data.fields, file_metadata, success=True)
-            print(json_output)
+            print(format_env_output(form_data.fields, env_prefix, file_metadata))
         else:
-            # Default: JSON to stdout
-            json_output = format_json_output(form_data.fields, file_metadata, success=True)
-            print(json_output)
+            print(format_json_output(form_data.fields, file_metadata, success=True))
 
         return EXIT_SUCCESS
 
     except KeyboardInterrupt:
-        print('\n\nInterrupted by user', file=sys.stderr)
-        return EXIT_INTERNAL_ERROR
+        print('\nInterrupted by user', file=sys.stderr)
+        return EXIT_INTERRUPTED
     except Exception as e:
         print(f'Internal error: {e}', file=sys.stderr)
-        import traceback
         traceback.print_exc(file=sys.stderr)
         return EXIT_INTERNAL_ERROR
 
 
-def load_html(args) -> Optional[str]:
+def _emit_failure(args, error: str) -> None:
+    """Print the JSON failure envelope unless env output was requested."""
+    if not args.print_env:
+        print(format_json_output({}, {}, success=False, error=error))
+
+
+def load_html(args) -> str:
     """
-    Load HTML from the appropriate source based on arguments.
+    Load HTML from the input source selected by the arguments.
 
-    Args:
-        args: Parsed command-line arguments
+    Priority: --html, --htmlfile, --field, then stdin.
 
-    Returns:
-        HTML string or None on error
+    Raises:
+        InputError: If the input cannot be read or is invalid
     """
-    try:
-        # Priority 1: --html
-        if args.html:
-            return args.html
+    if args.html is not None:
+        return args.html
 
-        # Priority 2: --htmlfile
-        if args.htmlfile:
+    if args.htmlfile is not None:
+        try:
             with open(args.htmlfile, 'r', encoding='utf-8') as f:
                 return f.read()
+        except FileNotFoundError:
+            raise InputError(f'File not found: {args.htmlfile}', EXIT_READ_ERROR)
+        except PermissionError:
+            raise InputError(f'Permission denied: {args.htmlfile}', EXIT_READ_ERROR)
+        except OSError as e:
+            raise InputError(f'Cannot read {args.htmlfile}: {e}', EXIT_READ_ERROR)
+        except UnicodeDecodeError as e:
+            raise InputError(f'{args.htmlfile} is not valid UTF-8: {e}', EXIT_READ_ERROR)
 
-        # Priority 3: --field (declarative)
-        if args.field:
-            return generate_html_from_fields(
-                args.field,
-                args.no_submit_button,
-                getattr(args, 'no_cancel_button', False),
-                getattr(args, 'cancel_label', 'Cancel')
-            )
+    if args.field:
+        return generate_html_from_fields(
+            args.field,
+            args.no_submit_button,
+            getattr(args, 'no_cancel_button', False),
+            getattr(args, 'cancel_label', 'Cancel')
+        )
 
-        # Priority 4: stdin
-        return read_stdin()
-
-    except FileNotFoundError as e:
-        print(f'Error: File not found: {e.filename}', file=sys.stderr)
-        return None
-    except PermissionError as e:
-        print(f'Error: Permission denied: {e.filename}', file=sys.stderr)
-        return None
-    except Exception as e:
-        print(f'Error reading input: {e}', file=sys.stderr)
-        return None
+    return read_stdin()
 
 
 def generate_html_from_fields(field_specs: list, no_submit_button: bool,
-                               no_cancel_button: bool = False,
-                               cancel_label: str = 'Cancel') -> str:
+                              no_cancel_button: bool = False,
+                              cancel_label: str = 'Cancel') -> str:
     """
-    Generate HTML from declarative field specifications.
+    Generate form HTML from declarative field specification strings.
 
-    Args:
-        field_specs: List of field specification strings
-        no_submit_button: Whether to omit submit button
-        no_cancel_button: Whether to omit cancel button
-        cancel_label: Label for the cancel button
-
-    Returns:
-        Generated HTML
+    Raises:
+        InputError: If a field specification is invalid (exit code 2)
     """
     fields = []
     for spec in field_specs:
         try:
-            field = FieldSpec.parse(spec)
-            fields.append(field)
+            fields.append(FieldSpec.parse(spec))
         except ValueError as e:
-            print(f'Error: {e}', file=sys.stderr)
-            sys.exit(EXIT_INVALID_HTML)
+            raise InputError(str(e), EXIT_INVALID_HTML)
 
-    add_submit = not no_submit_button
-    add_cancel = not no_cancel_button
-    return generate_form_html(fields, add_submit_button=add_submit,
-                              add_cancel_button=add_cancel, cancel_label=cancel_label)
+    return generate_form_html(fields, add_submit_button=not no_submit_button,
+                              add_cancel_button=not no_cancel_button, cancel_label=cancel_label)
 
 
 def read_stdin() -> str:
-    """
-    Read HTML from stdin.
-
-    Returns:
-        HTML string from stdin
-    """
+    """Read HTML from stdin."""
     if sys.stdin.isatty():
         print('Reading HTML from stdin (press Ctrl+D when done)...', file=sys.stderr)
-
     return sys.stdin.read()

@@ -190,3 +190,45 @@ class TestSanitizeEnvValue:
         assert '\x01' not in result
         assert '\x02' not in result
         assert 'text' in result
+
+
+class TestRepeatedFieldsAndNames:
+    def test_list_values(self):
+        output = format_env_output({'colours': ['red', 'blue']})
+        assert "export WEBFORM_COLOURS='red\\nblue'" in output
+        assert 'export WEBFORM_COLOURS_COUNT=2' in output
+        assert 'export WEBFORM_COLOURS_1=red' in output
+        assert 'export WEBFORM_COLOURS_2=blue' in output
+
+    def test_hyphenated_name_is_mapped(self):
+        output = format_env_output({'first-name': 'Ann', 'e.mail': 'a@b'})
+        assert 'export WEBFORM_FIRST_NAME=Ann' in output
+        assert 'export WEBFORM_E_MAIL=a@b' in output
+
+    def test_collision_warns_and_last_wins(self, capsys):
+        output = format_env_output({'a-b': '1', 'a_b': '2'})
+        assert output.count('export WEBFORM_A_B=') == 2
+        assert 'both map to WEBFORM_A_B' in capsys.readouterr().err
+
+    def test_files_exported(self):
+        files = {'doc': {'filename': 'a.txt', 'path': '/tmp/x/a.txt'},
+                 'pics': [{'filename': 'p1.png', 'path': '/tmp/x/p1.png'},
+                          {'filename': 'p2.png', 'path': '/tmp/x/p2.png'}]}
+        output = format_env_output({}, files=files)
+        assert 'export WEBFORM_DOC_PATH=/tmp/x/a.txt' in output
+        assert 'export WEBFORM_DOC_FILENAME=a.txt' in output
+        assert 'export WEBFORM_PICS_COUNT=2' in output
+        assert 'export WEBFORM_PICS_2_PATH=/tmp/x/p2.png' in output
+
+    def test_envfile_is_owner_only(self, tmp_path):
+        import os
+        import stat
+        from readwebform.output import write_env_file
+        path = tmp_path / 'secrets.env'
+        write_env_file(str(path), {'token': 's3cret'})
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+        assert "export WEBFORM_TOKEN=s3cret" in path.read_text()
+        # Rewriting an existing world-readable file also ends up 0600
+        os.chmod(path, 0o644)
+        write_env_file(str(path), {'token': 'new'})
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600

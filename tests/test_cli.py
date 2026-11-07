@@ -144,3 +144,39 @@ class TestCLIParser:
         for value in ['false', 'no', 'n', '0', 'False', 'NO']:
             args = parser.parse_args(['--reset-timeout-on-error', value])
             assert args.reset_timeout_on_error is False
+
+
+class TestCLIValidation:
+    """Regression tests for argument validation."""
+
+    def test_usage_error_exits_with_code_8(self):
+        parser = ReadWebFormArgumentParser()
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(['--timeout', '0'])
+        assert exc.value.code == 8
+
+    def test_invalid_size_limit_rejected_at_parse_time(self):
+        parser = ReadWebFormArgumentParser()
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(['--max-file-size', '5X'])
+        assert exc.value.code == 8
+
+    def test_empty_html_counts_as_an_input_source(self):
+        parser = ReadWebFormArgumentParser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(['--html', '', '--field', 'a:text'])
+
+    def test_float_timeout(self):
+        parser = ReadWebFormArgumentParser()
+        assert parser.parse_args(['--timeout', '0.5']).timeout == 0.5
+
+    def test_upload_dir_and_env_prefix(self):
+        parser = ReadWebFormArgumentParser()
+        args = parser.parse_args(['--upload-dir', '/tmp/up', '--env-prefix', 'FORM_'])
+        assert args.upload_dir == '/tmp/up'
+        assert args.env_prefix == 'FORM_'
+
+    def test_invalid_env_prefix(self):
+        parser = ReadWebFormArgumentParser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(['--env-prefix', '1BAD-'])

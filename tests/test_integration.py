@@ -636,8 +636,8 @@ class TestCLIProcessBehavior:
             pytest.fail("Process did not exit within 2 seconds after SIGINT")
 
         # Should return exit code 1 for keyboard interrupt
-        assert proc.returncode == 1, \
-            f"Expected exit code 1 for interrupt, got {proc.returncode}"
+        assert proc.returncode == 130, \
+            f"Expected exit code 130 for interrupt, got {proc.returncode}"
 
         stderr = proc.stderr.read().decode('utf-8')
         assert 'Interrupted' in stderr or 'interrupt' in stderr.lower(), \

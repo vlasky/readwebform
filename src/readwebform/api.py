@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, asdict
 from .server import FormServer
 from .parser import wrap_html_fragment, inject_csrf_token, validate_html
 from .forms import generate_form_html_from_dicts
-from .browser import launch_browser
 
 
 # Valid field types
@@ -162,7 +161,11 @@ def read_webform(
     max_total_size: Optional[int] = None,
     reset_timeout_on_error: bool = True,
     host: str = '127.0.0.1',
-    port: Optional[int] = None
+    port: Optional[int] = None,
+    cert_file: Optional[str] = None,
+    key_file: Optional[str] = None,
+    url_file: Optional[str] = None,
+    upload_dir: Optional[str] = None
 ) -> FormResult:
     """
     Display a web form and wait for user submission.
@@ -175,8 +178,13 @@ def read_webform(
         max_file_size: Maximum individual file upload size in bytes
         max_total_size: Maximum total upload size in bytes
         reset_timeout_on_error: Whether to reset timeout on errors (default: True)
-        host: Host to bind to (default: '127.0.0.1')
+        host: IPv4 or IPv6 address to bind to (default: '127.0.0.1')
         port: Port to bind to (None = auto-select)
+        cert_file: Path to a PEM certificate to serve HTTPS (requires key_file)
+        key_file: Path to the PEM private key for cert_file
+        url_file: If given, the form URL is written to this file once listening
+        upload_dir: Directory for uploaded files (default: a temporary directory
+            created on first upload and removed if left empty)
 
     Returns:
         FormResult with success flag, fields dict, and files dict
@@ -203,7 +211,10 @@ def read_webform(
         max_file_size=max_file_size,
         max_total_size=max_total_size,
         timeout=timeout,
-        reset_timeout_on_error=reset_timeout_on_error
+        reset_timeout_on_error=reset_timeout_on_error,
+        cert_file=cert_file,
+        key_file=key_file,
+        upload_dir=upload_dir
     )
 
     # Inject CSRF token
@@ -213,12 +224,10 @@ def read_webform(
     # Serve form and optionally launch browser
     # Browser is launched inside serve() AFTER server is bound (fixes race condition)
     try:
-        if launch_browser:
-            # Empty string for browser_path means system default
-            launch_path = browser_path if browser_path else ''
-            success, form_data, file_metadata, cancelled = server.serve(launch_browser_path=launch_path)
-        else:
-            success, form_data, file_metadata, cancelled = server.serve()
+        # Empty string for browser_path means system default
+        launch_path = (browser_path or '') if launch_browser else None
+        success, form_data, file_metadata, cancelled = server.serve(
+            launch_browser_path=launch_path, url_file=url_file)
     except OSError as e:
         return FormResult(success=False, error=f'bind_error: {e}')
     except Exception as e:
