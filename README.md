@@ -634,14 +634,12 @@ See [SPEC.md](SPEC.md) for the full design specification. This document covers a
 
 ### Test Coverage
 
-- **150 total tests**
-  - 106 unit tests (parser, forms, multipart, output, CLI)
-  - 14 integration tests (end-to-end server + CLI behavior)
-  - 10 threading/race condition tests
-  - 10 timeout behavior tests
-  - 10 HTTPS tests (using ephemeral certificates)
-- Tests actual HTTP/HTTPS requests, file uploads, CSRF validation, timeouts
-- HTTPS tests use `cryptography` library (test dependency only)
+- **307 tests** across 12 files
+  - Unit tests for the multipart parser, HTML rewriting, declarative forms, output formatting, CLI parsing and the Python API
+  - Integration tests that run a real server on a random port: submissions, uploads, CSRF, size limits, timeouts, the CLI as a subprocess (exit codes 2, 5 and 130)
+  - Hardening regressions: byte-exact uploads, UTF-8 filenames, repeated file fields, negative Content-Length, HTTP 410 on a second submission, listener release, concurrent servers, IPv6, idle HTTP and TLS connections
+  - Threading, timeout, HTTPS (ephemeral certificates via `cryptography`, test dependency only) and browser-launch isolation tests
+- CI runs the suite on Python 3.9 to 3.14 on Linux, plus macOS and Windows, and runs `ruff` and `pyright`
 
 ## Status
 
