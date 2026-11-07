@@ -245,6 +245,23 @@ class TestLifecycle:
         server.serve()
         assert not os.path.exists(created)
 
+    def test_losing_upload_removes_its_directory(self):
+        server = make_server('<form enctype="multipart/form-data">'
+                             '<input type="file" name="doc"><button>Go</button></form>', timeout=0.3)
+        server.serve()  # times out; no directory yet
+        # A handler that had already passed the initial check now tries to save
+        from readwebform.server import SessionFinished
+        with pytest.raises(SessionFinished):
+            server.get_upload_dir()
+        assert server.upload_dir is None
+
+    def test_upload_dir_refused_after_external_stop(self):
+        from readwebform.server import SessionFinished
+        server = make_server('<form><input name="a"><button>Go</button></form>')
+        server.shutdown_event.set()
+        with pytest.raises(SessionFinished):
+            server.get_upload_dir()
+
     def test_upload_dir_cannot_be_created_after_completion(self):
         from readwebform.server import SessionFinished
         server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.3)
@@ -385,8 +402,8 @@ class TestIdleConnections:
             # Shutdown must have closed the idle connection from the server side
             idle.settimeout(2)
             try:
-                assert idle.recv(16) == b''
-            except (ConnectionError, OSError):
+                assert idle.recv(16) == b''  # socket.timeout here means it was NOT closed
+            except ConnectionResetError:
                 pass
             idle.close()
         assert success
@@ -420,8 +437,8 @@ class TestIdleConnections:
             # The never-handshaked TLS connection is tracked and closed on shutdown
             idle.settimeout(2)
             try:
-                assert idle.recv(16) == b''
-            except (ConnectionError, OSError):
+                assert idle.recv(16) == b''  # socket.timeout here means it was NOT closed
+            except ConnectionResetError:
                 pass
             idle.close()
         assert success

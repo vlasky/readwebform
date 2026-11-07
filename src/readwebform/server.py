@@ -285,6 +285,7 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
                     file_metadata[name] = meta
         except SessionFinished:
             _unlink_all(saved_paths)
+            session._cleanup_upload_dir()
             self._send_error_page(410, 'Gone', 'This form has already been completed')
             return
         except Exception as e:
@@ -521,7 +522,7 @@ class FormServer:
     def get_upload_dir(self) -> str:
         """Return the upload directory, creating a temporary one on first use."""
         with self._lock:
-            if self._outcome is not None:
+            if self._outcome is not None or self.shutdown_event.is_set():
                 raise SessionFinished('session already completed')
             if self.upload_dir is None:
                 self.upload_dir = tempfile.mkdtemp(prefix='readwebform_')

@@ -232,3 +232,20 @@ class TestRepeatedFieldsAndNames:
         os.chmod(path, 0o644)
         write_env_file(str(path), {'token': 'new'})
         assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+        assert 'export WEBFORM_TOKEN=new' in path.read_text()
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='POSIX permission bits')
+    def test_envfile_keeps_old_contents_when_chmod_fails(self, tmp_path, monkeypatch):
+        import os
+
+        from readwebform.output import write_env_file
+        path = tmp_path / 'secrets.env'
+        path.write_text('old contents\n')
+
+        def fail(*args, **kwargs):
+            raise PermissionError('chmod denied')
+
+        monkeypatch.setattr(os, 'fchmod', fail)
+        with pytest.raises(PermissionError):
+            write_env_file(str(path), {'token': 's3cret'})
+        assert path.read_text() == 'old contents\n'

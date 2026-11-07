@@ -153,14 +153,17 @@ def write_env_file(filepath: str, fields: dict[str, Union[str, list[str]]],
         files: Optional file metadata
     """
     content = format_env_output(fields, prefix, files)
-    fd = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # Open without O_TRUNC so an existing file keeps its contents if the
+    # permission change below fails.
+    fd = os.open(filepath, os.O_WRONLY | os.O_CREAT, 0o600)
     try:
-        # The mode above only applies to a newly created file. If the file
-        # exists and cannot be made owner-only, refuse to write secrets to it.
+        # The creation mode only applies to a new file. If the file exists
+        # and cannot be made owner-only, refuse to write secrets to it.
         if hasattr(os, 'fchmod'):
             os.fchmod(fd, 0o600)
         else:  # pragma: no cover - Windows has no fchmod; chmod only sets read-only
             os.chmod(filepath, 0o600)
+        os.ftruncate(fd, 0)
     except OSError:
         os.close(fd)
         raise

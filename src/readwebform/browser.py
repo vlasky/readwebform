@@ -19,10 +19,12 @@ _DEFAULT_LAUNCHER = (
     'sys.exit(0 if webbrowser.open(sys.argv[1]) else 1)\n'
 )
 
-# How long to wait for the launcher child to report success. Background
-# browsers return almost immediately; a terminal browser (lynx, w3m) keeps
-# running, which we also treat as success.
-_LAUNCH_WAIT = 2.0
+# How long to wait for the launcher child to report an immediate failure
+# (no browser found). Background browsers return within this time; a child
+# still running afterwards is treated as success so the caller is not held
+# up. Terminal browsers (lynx, w3m) need a tty and are not supported by
+# --launch-browser: the URL is always printed to stderr for manual use.
+_LAUNCH_WAIT = 0.3
 
 
 def launch_browser(url: str, browser_path: Optional[str] = None) -> bool:
@@ -71,7 +73,7 @@ def _launch_default_browser(url: str) -> bool:
     try:
         return proc.wait(timeout=_LAUNCH_WAIT) == 0
     except subprocess.TimeoutExpired:
-        return True  # still running: a foreground/terminal browser
+        return True  # still running: treat as launched
 
 
 def _launch_custom_browser(url: str, browser_path: str) -> bool:
