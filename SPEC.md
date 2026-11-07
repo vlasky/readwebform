@@ -144,11 +144,15 @@ Each field is specified as:
 
 ### Supported Field Types
 
-`text`, `email`, `password`, `number`, `date`, `url`, `textarea`, `select`, `checkbox`, `file`
+`text`, `email`, `password`, `number`, `date`, `time`, `datetime-local`, `month`, `week`, `url`, `tel`, `search`, `range`, `color`, `hidden`, `textarea`, `select`, `radio`, `checkbox`, `file`
 
 ### Common Options
 
-`required`, `placeholder`, `min`, `max`, `step`, `rows`, `cols`, `accept`, `multiple`, `options=a|b|c`
+Flags: `required`, `readonly`, `disabled`, `autofocus`, `checked`, `multiple`.
+
+Values: `placeholder`, `value` (default value; selected option(s) for `select`, checked option for `radio`), `min`, `max`, `step`, `minlength`, `maxlength`, `pattern`, `rows`, `cols`, `accept`, `options=a|b|c`.
+
+Options are comma-separated. A segment without `=` that is not a known flag continues the previous value, so `accept=.pdf,.docx` is one option. Labels and values are URL-decoded (`+` is a space).
 
 -   The form’s `enctype` is automatically set to `multipart/form-data` if any file fields are defined.
     
@@ -264,12 +268,16 @@ The JSON output always includes all four keys for consistent parsing:
   "files": {
     "resume": {
       "filename": "cv.pdf",
-      "path": "/tmp/readwebform_b73j3d/cv.pdf"
+      "path": "/tmp/readwebform_b73j3d/cv.pdf",
+      "size": 48213,
+      "content_type": "application/pdf"
     }
   },
   "error": null
 }
 ```
+
+A field name that occurs more than once in the submission (checkbox group, multi-select) maps to a list of strings. A file field that occurs more than once (`<input type="file" multiple>`) maps to a list of file objects. Single occurrences stay scalar.
 
 On timeout or error:
 ```json
@@ -299,9 +307,11 @@ export WEBFORM_EMAIL='alice@example.com'
     
 -   Control characters, backticks, and `$` are stripped or escaped.
     
--   Variable names must match `[A-Za-z_][A-Za-z0-9_]*`.
-    
--   Warning shown if invalid names are skipped.
+-   Variable names are `PREFIX` + the field name upper-cased with every character outside `[A-Za-z0-9_]` replaced by `_`; the prefix defaults to `WEBFORM_` (`--env-prefix`). A warning is printed when two fields map to the same name.
+
+-   A repeated field produces `NAME` (values joined by newline, rendered as `\n`), `NAME_COUNT` and `NAME_1`..`NAME_N`. Uploaded files produce `NAME_PATH` and `NAME_FILENAME` (indexed when repeated).
+
+-   Envfiles are created with mode `0600`.
     
 -   Explicit disclaimer:
     
@@ -317,7 +327,7 @@ export WEBFORM_EMAIL='alice@example.com'
     
 -   External form `action` URLs are rejected.
     
--   Relative `action` attributes are patched to match the assigned endpoint.
+-   The form's `action` and `method` attributes are replaced so the form posts to the assigned endpoint; other attributes are preserved. The form is located with an HTML parser, so a `<form>` inside a comment does not count.
     
 -   Missing submit buttons produce a warning in manual HTML modes.
     
@@ -334,11 +344,12 @@ export WEBFORM_EMAIL='alice@example.com'
 | 1 | Internal error |
 | 2 | Invalid HTML or missing form |
 | 3 | Could not read input file |
-| 4 | Browser launch failure |
+| 4 | Reserved (browser launch failures only warn) |
 | 5 | Timeout waiting for submission |
-| 6 | Upload size exceeded |
+| 6 | Reserved (oversized uploads are rejected with HTTP 413 and the form stays open) |
 | 7 | User cancelled the form |
 | 8 | Invalid argument |
+| 130 | Interrupted (Ctrl+C) |
 
 * * *
 
@@ -361,6 +372,16 @@ export WEBFORM_EMAIL='alice@example.com'
     -   Must match on POST or submission is rejected with HTTP 403.
         
     -   Ensures only the fetched form can be validly submitted.
+
+-   The form is served at a random path (`/readform_<16 hex>`); other paths return 404.
+
+-   Exactly one submission is accepted. The outcome (success, cancel, timeout) is recorded once under a lock; a later submission receives HTTP 410 and any files it saved are removed.
+
+-   Each connection is handled on its own thread with an idle socket timeout (30 s), and for HTTPS the TLS handshake happens on that thread, so an idle, half-open or non-handshaking connection cannot block other clients or the timeout.
+
+-   `Content-Length` must be present and non-negative, and is checked against the total size limit (default 20 MB) before the body is read.
+
+-   Uploaded filenames are reduced to a sanitised basename; files are created with `O_EXCL` and mode `0600`.
         
 
 * * *

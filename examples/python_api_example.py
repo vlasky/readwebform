@@ -69,10 +69,10 @@ def collect_file():
 
     if result.success and 'document' in result.files:
         file_info = result.files['document']
-        print(f"\n✓ File uploaded:")
-        print(f"  Filename: {file_info['filename']}")
-        print(f"  Saved to: {file_info['path']}")
-        return file_info['path']
+        print("\n✓ File uploaded:")
+        print(f"  Filename: {file_info.filename}")
+        print(f"  Saved to: {file_info.path}")
+        return file_info.path
     else:
         print("\n✗ No file uploaded or timeout")
         return None

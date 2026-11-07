@@ -33,23 +33,31 @@ Programmatic Usage:
     ])
 """
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
+    try:
+        __version__ = _pkg_version("readwebform")
+    except PackageNotFoundError:
+        __version__ = "0.3.0"
+except ImportError:  # pragma: no cover
+    __version__ = "0.3.0"
 __author__ = "Vlad Lasky"
 __email__ = "github@vladlasky.com"
 
 # High-level API (recommended)
-from readwebform.api import read_webform, read_webform_fields, FormResult, Field, UploadedFile
+from readwebform.api import Field, FormResult, UploadedFile, read_webform, read_webform_fields
 
 # Low-level API (for advanced use)
 from readwebform.server import FormServer
 
 __all__ = [
+    'Field',
+    'FormResult',
+    # Low-level API
+    'FormServer',
+    'UploadedFile',
     # High-level API
     'read_webform',
     'read_webform_fields',
-    'FormResult',
-    'Field',
-    'UploadedFile',
-    # Low-level API
-    'FormServer',
 ]

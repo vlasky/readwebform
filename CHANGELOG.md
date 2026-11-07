@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.3.0] - 2026-11-07
+
+### Fixed
+
+- Multipart parser truncated files and fields ending in CR/LF, treated boundary text inside a payload as a delimiter, rejected non-ASCII filenames with HTTP 400, and depended on the order of Content-Disposition parameters
+- `<input type="file" multiple>` with more than one file returned HTTP 500
+- `--print-env` and `--envfile` crashed on repeated fields (checkbox groups, multi-selects)
+- A user form with `method="get"` kept submitting via GET and the submission was lost
+- `value=` was ignored for every declarative field type except checkbox
+- A negative `Content-Length` bypassed all size limits
+- `--host ::1` (IPv6) could not bind
+- The listening socket stayed open after a successful submission, so a fixed `--port` could not be reused in the same process
+- A connection that never sent a request (or never completed the TLS handshake on an HTTPS port) blocked the single server thread until the timeout
+- Several `FormServer` instances in one process overwrote each other's state
+- A second submission arriving during shutdown could overwrite the first
+- An empty temporary upload directory was created on every run and never removed
+- `--title` was not shown on the page in CLI mode; CLI and API pages used different templates and the CLI cancel button was unstyled
+- `accept=.pdf,.docx` (as documented) only accepted `.pdf`
+- Backslashes in `--text` raised an error when the input was a complete HTML document
+- A `<form>` inside an HTML comment, or a `>` inside a quoted attribute, confused the form rewriting
+- Browser output could corrupt the JSON on stdout
+- `--html ''` fell through to reading stdin
+- Usage errors exited with code 2 instead of the documented 8
+- The README Python upload example indexed `UploadedFile` like a dict
+- `__version__` reported 0.1.0
+
+### Added
+
+- Field types `radio`, `hidden`, `tel`, `search`, `time`, `datetime-local`, `month`, `week`, `range`, `color`
+- Field options `checked`, `readonly`, `disabled`, `autofocus`, `minlength`, `maxlength`; `value=` for select (`a|b` with `multiple`), radio and textarea
+- `--upload-dir` to choose where uploads are saved
+- `--env-prefix`; environment output for repeated fields (`NAME`, `NAME_COUNT`, `NAME_1..N`) and for uploaded files (`NAME_PATH`, `NAME_FILENAME`)
+- `cert_file`, `key_file`, `url_file`, `upload_dir` parameters on `read_webform()`
+- `Field.checked`, `Field.minlength`, `Field.maxlength`; `Field.value` accepts a list for multi-selects
+- `--timeout` accepts fractional seconds
+- JSON `files` entries include `size` and `content_type`
+- ruff and pyright configuration; GitHub Actions test matrix
+
+### Changed
+
+- The server is now `http.server.ThreadingHTTPServer` based: one thread per connection with a socket timeout, TLS handshake on the connection thread, outcome recorded once under a lock, listener always closed on exit
+- A submission arriving after the session has completed receives HTTP 410
+- Ctrl+C exits with code 130 and prints the JSON failure envelope with `"error": "interrupted"`
+- `--envfile` and `--print-env` can be combined; envfiles are created with mode `0600`
+- Field names with characters outside `[A-Za-z0-9_]` are mapped to underscores in environment output instead of being skipped
+- `FormResult.fields` values and `FormResult.files` values may be lists for repeated fields
+- Exit codes 4 and 6 are documented as reserved; they were never returned
+- `Content-Length` is required on POST
+
 ## [0.2.0] - 2025-01-13
 
 ### Added

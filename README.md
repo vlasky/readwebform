@@ -1,6 +1,6 @@
 # readwebform
 
-![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -137,19 +137,21 @@ cat form.html | readwebform
 | `--html "<string>"` | Inline HTML fragment or document containing one `<form>` element |
 | `--htmlfile <path>` | Path to an HTML file containing a form |
 | `--field <spec>` | Declaratively define form fields (repeatable) |
-| `--title <string>` | Page title shown above the form |
+| `--title <string>` | Page title, shown as a heading above the form and in the browser tab |
 | `--text <string>` | Instructional text shown above the form |
-| `--host <ip>` | Host/IP to bind to (default: `127.0.0.1`) |
+| `--host <ip>` | IPv4 or IPv6 address to bind to (default: `127.0.0.1`) |
 | `--port <int>` | TCP port (default: random available port) |
 | `--cert <path>` | SSL certificate file (PEM) for HTTPS |
 | `--key <path>` | SSL private key file (PEM) for HTTPS |
 | `--max-file-size <limit>` | Maximum individual upload size (e.g., `5M`, `200K`) |
-| `--max-total-size <limit>` | Maximum total upload size (e.g., `20M`, `1G`) |
-| `--timeout <seconds>` | Max time to wait for submission (default: `300`) |
+| `--max-total-size <limit>` | Maximum total request size (e.g., `20M`, `1G`; default `20M`) |
+| `--upload-dir <path>` | Directory for uploaded files (default: a new temporary directory) |
+| `--timeout <seconds>` | Max time to wait for submission, fractional allowed (default: `300`) |
 | `--reset-timeout-on-error <bool>` | Reset timeout on recoverable errors (default: true) |
-| `--json` | Output result as JSON (default) |
-| `--envfile <path>` | Write sanitized `export` statements to file |
-| `--print-env` | Print sanitized environment variable exports to stdout |
+| `--json` | Output result as JSON (default; accepted for compatibility) |
+| `--envfile <path>` | Write sanitized `export` statements to a file (mode `0600`) |
+| `--print-env` | Print sanitized `export` statements to stdout instead of JSON |
+| `--env-prefix <prefix>` | Prefix for environment variable names (default: `WEBFORM_`) |
 | `--url-file <path>` | Write the form URL to this file |
 | `--launch-browser [path]` | Launch default browser, or specify browser path |
 | `--no-submit-button` | Disable automatic submit button in declarative mode |
@@ -162,18 +164,34 @@ cat form.html | readwebform
 --field name:type[:label][:options]
 ```
 
-Use `+` to represent spaces in labels and placeholders (e.g., `Full+Name` becomes "Full Name").
+Labels and option values are URL-decoded: use `+` for a space and `%XX` for other characters (e.g., `Full+Name` becomes "Full Name", `%2C` is a literal comma, `%3A` a colon).
 
-**Supported types:** `text`, `email`, `password`, `number`, `date`, `url`, `textarea`, `select`, `checkbox`, `file`
+**Supported types:** `text`, `email`, `password`, `number`, `date`, `time`, `datetime-local`, `month`, `week`, `url`, `tel`, `search`, `range`, `color`, `hidden`, `textarea`, `select`, `radio`, `checkbox`, `file`
 
-**Common options:** `required`, `placeholder=hint`, `min=0`, `max=100`, `step=1`, `rows=4`, `cols=50`, `accept=.pdf,.docx`, `multiple`, `options=a|b|c`
+**Options** (comma-separated; flags take no value):
+
+| Option | Applies to | Meaning |
+|--------|------------|---------|
+| `required`, `readonly`, `disabled`, `autofocus` | most | HTML attributes of the same name |
+| `placeholder=hint` | text-like, textarea | Placeholder text |
+| `value=...` | all except file | Default value: the input text, the selected option(s), the checked radio, or the submitted value of a checkbox |
+| `checked` | checkbox | Tick the box initially |
+| `min=`, `max=`, `step=` | number, range, date/time | Range constraints |
+| `minlength=`, `maxlength=`, `pattern=` | text-like, textarea | Length and regex constraints |
+| `rows=`, `cols=` | textarea | Size |
+| `options=a\|b\|c` | select, radio | Choices, separated by `\|` |
+| `multiple` | select, file, email | Allow several values; for `select`, `value=a\|c` preselects several |
+| `accept=.pdf,.docx` | file | Accepted file types (a literal comma is fine here) |
 
 **Examples:**
 ```bash
 --field name:text:Full+Name:required,placeholder=Your+name
 --field age:number:Age:min=0,max=120
 --field resume:file:Upload+Resume:accept=.pdf,.docx
---field country:select:Country:options=US|UK|CA,required
+--field country:select:Country:options=US|UK|CA,value=UK,required
+--field plan:radio:Plan:options=free|pro,value=free
+--field notify:checkbox:Email+me+updates:checked
+--field photos:file:Photos:multiple,accept=image/*
 ```
 
 ## Output Formats
@@ -192,10 +210,21 @@ The JSON output always includes all four keys for consistent parsing:
   "files": {
     "resume": {
       "filename": "cv.pdf",
-      "path": "/tmp/readwebform_b73j3d/cv.pdf"
+      "path": "/tmp/readwebform_b73j3d/cv.pdf",
+      "size": 48213,
+      "content_type": "application/pdf"
     }
   },
   "error": null
+}
+```
+
+A field that is submitted more than once (a checkbox group, a `select` with `multiple`) is a list of strings, and a file input with `multiple` is a list of file objects:
+
+```json
+{
+  "fields": { "colours": ["red", "blue"] },
+  "files": { "photos": [ { "filename": "a.jpg", "path": "..." }, { "filename": "b.jpg", "path": "..." } ] }
 }
 ```
 
@@ -229,15 +258,28 @@ readwebform --print-env --field name:text:Name --field email:email:Email
 
 Output:
 ```bash
-export WEBFORM_NAME='Alice'
-export WEBFORM_EMAIL='alice@example.com'
+# WARNING: Environment files are for trusted local use only.
+# Do not source envfiles generated from untrusted form data.
+export WEBFORM_NAME=Alice
+export WEBFORM_EMAIL=alice@example.com
 ```
 
-Field names are converted to uppercase, prefixed with `WEBFORM_`, and non-alphanumeric characters are replaced with underscores.
+Field names are upper-cased, prefixed with `WEBFORM_` (change it with `--env-prefix`), and any character that is not a letter, digit or underscore becomes an underscore, so `first-name` is `WEBFORM_FIRST_NAME`.
+
+A repeated field such as a checkbox group produces the values joined by newlines (written as the literal two characters `\n`), plus a count and indexed variables:
+
+```bash
+export WEBFORM_COLOURS='red\nblue'
+export WEBFORM_COLOURS_COUNT=2
+export WEBFORM_COLOURS_1=red
+export WEBFORM_COLOURS_2=blue
+```
+
+Uploaded files produce `WEBFORM_<NAME>_PATH` and `WEBFORM_<NAME>_FILENAME` (indexed as `_1_PATH`, `_2_PATH`... for a `multiple` file input). Envfiles are created with mode `0600` because they may contain submitted secrets.
 
 ### File Upload Cleanup
 
-Uploaded files are stored in a temporary directory (e.g., `/tmp/readwebform_XXXX/`) and are **not automatically deleted**. Your script is responsible for cleaning up these files after processing to avoid leaving sensitive data on disk.
+Uploaded files are stored in a temporary directory (e.g., `/tmp/readwebform_XXXX/`) created when the first file is saved, or in the directory given with `--upload-dir`. They are **not automatically deleted**. Your script is responsible for cleaning up these files after processing to avoid leaving sensitive data on disk.
 
 ## Exit Codes
 
@@ -247,13 +289,14 @@ Uploaded files are stored in a temporary directory (e.g., `/tmp/readwebform_XXXX
 | 1 | Internal error |
 | 2 | Invalid HTML or missing form |
 | 3 | Could not read input file |
-| 4 | Browser launch failure |
 | 5 | Timeout waiting for submission |
-| 6 | Upload size exceeded |
 | 7 | User cancelled the form |
 | 8 | Invalid argument |
+| 130 | Interrupted (Ctrl+C) |
 
-Exit code 0 with default output mode (`--json`) guarantees valid JSON on stdout.
+Codes 4 and 6 are reserved and never returned: a browser that fails to launch only produces a warning (the URL is still printed), and an upload over the size limit is rejected with HTTP 413 so the user can try again.
+
+Exit code 0 with default output mode (`--json`) guarantees valid JSON on stdout. Timeout, cancellation and interruption also print the JSON envelope (with `"success": false`) unless `--print-env` is used.
 
 ## HTTPS Support
 
@@ -316,7 +359,11 @@ The server automatically shuts down after a single form submission.
 
 - Defaults to `127.0.0.1` (localhost only)
 - HTTPS support
-- CSRF token protection for each session
+- CSRF token protection for each session, and the form lives at a random URL path
+- Exactly one submission is accepted; any later submission receives HTTP 410 and its files are discarded
+- Every connection is handled on its own thread with a socket timeout, so an idle or half-open connection cannot stall the server
+- Request bodies are capped (`--max-total-size`, default 20 MB) before they are read
+- Uploaded filenames are reduced to a safe basename; files and envfiles are created with mode `0600`
 - User-provided HTML is served as-is; generated forms (`--field`) contain no external resources or scripts
 - Stateless and ephemeral by design
 
@@ -383,10 +430,10 @@ html = '''
 
 result = read_webform(html, max_file_size=10*1024*1024)  # 10 MB limit
 
-if result.success and 'document' in result.files:
-    filepath = result.files['document']['path']
-    filename = result.files['document']['filename']
-    print(f"File saved to: {filepath}")
+if result.success and result.files and 'document' in result.files:
+    doc = result.files['document']          # an UploadedFile
+    print(f"{doc.filename} ({doc.size} bytes, {doc.content_type}) saved to {doc.path}")
+    filepath = doc.path
 
     # Process the uploaded file
     with open(filepath, 'rb') as f:
@@ -409,49 +456,63 @@ if result.success and 'document' in result.files:
 | `max_file_size` | `None` | Maximum individual file size in bytes |
 | `max_total_size` | `None` | Maximum total upload size in bytes |
 | `reset_timeout_on_error` | `True` | Reset timeout on validation errors |
-| `host` | `'127.0.0.1'` | Host to bind to |
+| `host` | `'127.0.0.1'` | IPv4 or IPv6 address to bind to |
 | `port` | `None` | Port to bind to (default: auto-select) |
+| `cert_file`, `key_file` | `None` | PEM certificate and key to serve HTTPS |
+| `url_file` | `None` | Write the form URL to this file once listening |
+| `upload_dir` | `None` | Directory for uploads (default: temporary directory created on first upload) |
 
 #### `read_webform_fields(fields, title=None, text=None, **kwargs)`
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `fields` | (required) | List of field specifications |
-| `title` | `None` | Page title |
+| `title` | `None` | Page title, shown as a heading above the form |
 | `text` | `None` | Instructional text above form |
+| `add_cancel_button` | `True` | Add a Cancel button |
+| `cancel_label` | `'Cancel'` | Label for the Cancel button |
 
 All other parameters same as `read_webform()`.
 
 #### Field Specification
 
-Each field is a dict:
+Each field is a `Field` dataclass (recommended, gives IDE completion) or a dict with the same keys:
 
 ```python
-{
-    'name': 'field_name',      # Required: field name
-    'type': 'text',            # Required: text, email, password, number, date, url,
-                               #           textarea, select, checkbox, file
-    'label': 'Display Label',  # Optional: label shown to user
-    'required': True,          # Optional: whether field is required
-    'placeholder': 'hint',     # Optional: placeholder text
-    'min': 0,                  # Optional: for number/date fields
-    'max': 100,                # Optional: for number/date fields
-    'step': 1,                 # Optional: for number fields
-    'rows': 4,                 # Optional: for textarea
-    'cols': 50,                # Optional: for textarea
-    'options': ['A', 'B'],     # Required for select: list of choices
-    'accept': '.pdf,.txt',     # Optional: for file input
-}
+from readwebform import Field
+
+Field(
+    name='field_name',         # Required: field name
+    type='text',               # Required: any type listed under "Declarative Field Syntax"
+    label='Display Label',     # Optional: label shown to user
+    required=True,             # Optional: whether field is required
+    placeholder='hint',        # Optional: placeholder text
+    value='default',           # Optional: default value (text, selected option(s), checked radio)
+    checked=True,              # Optional: tick a checkbox initially
+    min=0, max=100, step=1,    # Optional: for number/range/date fields
+    minlength=2, maxlength=40, # Optional: for text-like fields
+    pattern=r'[a-z]+',         # Optional: regex constraint
+    rows=4, cols=50,           # Optional: for textarea
+    options=['A', 'B'],        # Required for select/radio: list of choices
+    multiple=True,             # Optional: select/file/email accept several values
+    accept='.pdf,.txt',        # Optional: for file input
+)
 ```
 
 ### Return Value: `FormResult`
 
 ```python
 class FormResult:
-    success: bool                           # True if form submitted, False if timeout/cancel
-    fields: Optional[Dict[str, str]]        # Field name -> value (None if not success)
-    files: Optional[Dict[str, Dict]]        # File field -> {'filename': ..., 'path': ...}
-    error: Optional[str]                    # 'timeout', 'cancelled', or other error
+    success: bool                      # True if form submitted, False if timeout/cancel
+    fields: Optional[Dict[str, Union[str, List[str]]]]  # Field name -> value; repeated fields are lists (None if not success)
+    files: Optional[Dict[str, Union[UploadedFile, List[UploadedFile]]]]  # None if no files
+    error: Optional[str]               # 'timeout', 'cancelled', or other error
+
+class UploadedFile:
+    filename: str                      # Name supplied by the browser
+    path: str                          # Where the file was saved
+    size: int                          # Bytes
+    content_type: str                  # MIME type supplied by the browser
 ```
 
 ## Examples
@@ -550,11 +611,15 @@ except TimeoutError as e:
 ## Development
 
 ```bash
-# Install in development mode with test dependencies
-pip install -e ".[test]"
+# Install in development mode with test and lint dependencies
+pip install -e ".[test,dev]"
 
 # Run all tests
 python -m pytest tests/ -v
+
+# Lint and type-check
+ruff check src tests
+pyright src
 
 # Run only unit tests
 python -m pytest tests/ -v --ignore=tests/test_integration.py
