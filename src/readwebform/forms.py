@@ -5,6 +5,8 @@ Declarative form generation for readwebform.
 import urllib.parse
 from typing import Dict, List, Optional
 
+from .parser import render_page
+
 
 class FieldSpec:
     """Represents a parsed field specification."""
@@ -335,63 +337,4 @@ def generate_form_html_from_dicts(
     form_html = generate_form_html(field_specs, add_submit_button=add_submit,
                                    add_cancel_button=add_cancel, cancel_label=cancel_label)
 
-    # Wrap in complete HTML document
-    title_html = f'<h1>{escape_html(title)}</h1>' if title else ''
-    text_html = f'<p>{escape_html(text)}</p>' if text else ''
-
-    return f'''<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{escape_html(title) if title else 'Form'}</title>
-    <style>
-        body {{
-            font-family: system-ui, -apple-system, sans-serif;
-            max-width: 600px;
-            margin: 40px auto;
-            padding: 20px;
-        }}
-        label {{
-            display: block;
-            margin: 15px 0 5px;
-            font-weight: 500;
-        }}
-        input, select, textarea {{
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }}
-        input[type="checkbox"] {{
-            width: auto;
-            margin-right: 8px;
-        }}
-        button {{
-            margin-top: 20px;
-            padding: 10px 20px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-right: 10px;
-        }}
-        button:hover {{
-            background: #0056b3;
-        }}
-        button.cancel {{
-            background: #6c757d;
-        }}
-        button.cancel:hover {{
-            background: #5a6268;
-        }}
-    </style>
-</head>
-<body>
-    {title_html}
-    {text_html}
-    {form_html}
-</body>
-</html>'''
+    return render_page(form_html, title=title, text=text)
