@@ -13,8 +13,9 @@ from .browser import launch_browser
 
 # Valid field types
 FieldType = Literal[
-    'text', 'email', 'password', 'number', 'date', 'url',
-    'textarea', 'select', 'checkbox', 'file'
+    'text', 'email', 'password', 'number', 'date', 'url', 'tel', 'search',
+    'time', 'datetime-local', 'month', 'week', 'range', 'color', 'hidden',
+    'textarea', 'select', 'checkbox', 'radio', 'file'
 ]
 
 
@@ -29,8 +30,14 @@ class Field:
         fields = [
             Field(name='email', type='email', label='Email Address', required=True),
             Field(name='age', type='number', label='Age', min=0, max=120),
-            Field(name='country', type='select', label='Country', options=['US', 'UK', 'CA']),
+            Field(name='country', type='select', label='Country', options=['US', 'UK', 'CA'], value='UK'),
+            Field(name='plan', type='radio', label='Plan', options=['free', 'pro']),
+            Field(name='notify', type='checkbox', label='Email me', checked=True),
         ]
+
+    ``value`` pre-fills the field: the text of an input or textarea, the
+    selected option(s) of a select or radio group, or the submitted value of
+    a checkbox (use ``checked`` to tick it).
         result = read_webform_fields(fields)
     """
     name: str
@@ -47,7 +54,10 @@ class Field:
     accept: Optional[str] = None
     multiple: bool = False
     pattern: Optional[str] = None
-    value: Optional[str] = None
+    value: Optional[Union[str, int, float, List[str]]] = None
+    checked: bool = False
+    minlength: Optional[int] = None
+    maxlength: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert Field to dictionary format for internal use."""
@@ -79,6 +89,12 @@ class Field:
             result['pattern'] = self.pattern
         if self.value is not None:
             result['value'] = self.value
+        if self.checked:
+            result['checked'] = True
+        if self.minlength is not None:
+            result['minlength'] = self.minlength
+        if self.maxlength is not None:
+            result['maxlength'] = self.maxlength
 
         return result
 

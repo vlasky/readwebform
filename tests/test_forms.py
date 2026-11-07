@@ -163,3 +163,86 @@ class TestEscaping:
     def test_escape_empty(self):
         assert escape_html('') == ''
         assert escape_attr('') == ''
+
+
+class TestDefaultsAndNewTypes:
+    """Regression tests for value handling and additional field types."""
+
+    def test_text_value_rendered(self):
+        html = generate_field_html(FieldSpec.parse('x:text:Label:value=hello+world'))
+        assert 'value="hello world"' in html
+
+    def test_textarea_value_rendered_as_content(self):
+        html = generate_field_html(FieldSpec.parse('x:textarea::value=Some+%3Ctext%3E'))
+        assert '>Some &lt;text&gt;</textarea>' in html
+
+    def test_select_value_marks_selected(self):
+        html = generate_field_html(FieldSpec.parse('c:select:Country:options=US|UK|CA,value=UK'))
+        assert '<option value="UK" selected>UK</option>' in html
+        assert '<option value="US">US</option>' in html
+
+    def test_multi_select_values(self):
+        html = generate_field_html(FieldSpec.parse('c:select::options=a|b|c,multiple,value=a|c'))
+        assert '<select name="c" id="c" multiple>' in html
+        assert html.count(' selected') == 2
+
+    def test_checkbox_checked_flag(self):
+        html = generate_field_html(FieldSpec.parse('agree:checkbox:Agree:checked,value=yes'))
+        assert 'type="checkbox"' in html and ' checked' in html and 'value="yes"' in html
+
+    def test_radio_group(self):
+        html = generate_field_html(FieldSpec.parse('plan:radio:Plan:options=free|pro,value=pro,required'))
+        assert '<legend>Plan</legend>' in html
+        assert '<input type="radio" name="plan" id="plan_0" value="free" required>' in html
+        assert '<input type="radio" name="plan" id="plan_1" value="pro" checked required>' in html
+        assert '<label for="plan_1">pro</label>' in html
+
+    def test_hidden_field_has_no_label(self):
+        html = generate_field_html(FieldSpec.parse('token:hidden::value=abc'))
+        assert '<label' not in html
+        assert '<input type="hidden" name="token" id="token" value="abc">' in html
+
+    def test_new_input_types_accepted(self):
+        for t in ['tel', 'search', 'time', 'datetime-local', 'month', 'week', 'range', 'color']:
+            html = generate_field_html(FieldSpec.parse(f'f:{t}'))
+            assert f'type="{t}"' in html
+
+    def test_accept_with_literal_commas(self):
+        spec = FieldSpec.parse('upload:file:Upload:accept=.pdf,.docx,.txt,required')
+        assert spec.options == {'accept': '.pdf,.docx,.txt', 'required': 'true'}
+        assert 'accept=".pdf,.docx,.txt"' in generate_field_html(spec)
+
+    def test_pattern_with_comma(self):
+        spec = FieldSpec.parse('code:text::pattern=[a-z]{2,4}')
+        assert spec.options['pattern'] == '[a-z]{2,4}'
+
+    def test_unknown_bare_option_rejected(self):
+        with pytest.raises(ValueError, match='Unknown option'):
+            FieldSpec.parse('x:text::bogus')
+
+    def test_empty_name_rejected(self):
+        with pytest.raises(ValueError, match='empty'):
+            FieldSpec.parse(':text')
+
+    def test_file_value_ignored(self):
+        html = generate_field_html(FieldSpec.parse('f:file::value=secret'))
+        assert 'value=' not in html
+
+
+class TestDictToFieldSpec:
+    def test_value_and_checked_from_dict(self):
+        from readwebform.forms import dict_to_fieldspec
+        spec = dict_to_fieldspec({'name': 'n', 'type': 'checkbox', 'checked': True, 'value': 'yes'})
+        html = generate_field_html(spec)
+        assert ' checked' in html and 'value="yes"' in html
+
+    def test_list_value_for_multi_select(self):
+        from readwebform.forms import dict_to_fieldspec
+        spec = dict_to_fieldspec({'name': 'c', 'type': 'select', 'options': ['a', 'b'],
+                                  'multiple': True, 'value': ['a', 'b']})
+        assert generate_field_html(spec).count(' selected') == 2
+
+    def test_invalid_type_rejected(self):
+        from readwebform.forms import dict_to_fieldspec
+        with pytest.raises(ValueError, match='Invalid field type'):
+            dict_to_fieldspec({'name': 'n', 'type': 'bogus'})

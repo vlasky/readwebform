@@ -2,10 +2,26 @@
 Declarative form generation for readwebform.
 """
 
+import html as html_mod
 import urllib.parse
 from typing import Dict, List, Optional
 
 from .parser import render_page
+
+# Field types accepted by --field and the Python API
+VALID_TYPES = frozenset({
+    'text', 'email', 'password', 'number', 'date', 'url', 'tel', 'search',
+    'time', 'datetime-local', 'month', 'week', 'range', 'color', 'hidden',
+    'textarea', 'select', 'checkbox', 'radio', 'file',
+})
+
+# Options that take no value. Anything else without '=' continues the
+# previous option's value, so accept=.pdf,.docx works as documented.
+FLAG_OPTIONS = frozenset({'required', 'multiple', 'checked', 'readonly', 'disabled', 'autofocus'})
+
+# Options copied verbatim onto <input> elements when present
+_INPUT_PASSTHROUGH = ('placeholder', 'min', 'max', 'step', 'accept', 'pattern',
+                      'minlength', 'maxlength', 'autocomplete', 'list')
 
 
 class FieldSpec:
@@ -21,66 +37,79 @@ class FieldSpec:
     @classmethod
     def parse(cls, spec: str) -> 'FieldSpec':
         """
-        Parse field specification string.
+        Parse a field specification string.
 
         Format: name:type[:label][:options]
         Example: name:text:Full+Name:required,placeholder=Your+name
 
-        Args:
-            spec: Field specification string
-
-        Returns:
-            FieldSpec instance
+        Labels and option values are URL-decoded (``+`` becomes a space,
+        ``%2C`` a comma). Options are comma-separated ``key=value`` pairs or
+        bare flags (``required``, ``multiple``, ``checked``...). A comma in a
+        value is allowed where the text after it is not a flag, so
+        ``accept=.pdf,.docx`` is a single option.
 
         Raises:
-            ValueError: If specification is invalid
+            ValueError: If the specification is invalid
         """
         parts = spec.split(':', 3)
         if len(parts) < 2:
             raise ValueError(f'Invalid field spec: {spec} (expected name:type[:label][:options])')
 
         name = parts[0].strip()
-        field_type = parts[1].strip()
+        field_type = parts[1].strip().lower()
         label = None
-        options = {}
+        options: Dict[str, str] = {}
 
-        if len(parts) >= 3:
+        if not name:
+            raise ValueError(f'Invalid field spec: {spec} (field name is empty)')
+
+        if field_type not in VALID_TYPES:
+            raise ValueError(
+                f'Invalid field type: {field_type} (must be one of {", ".join(sorted(VALID_TYPES))})'
+            )
+
+        if len(parts) >= 3 and parts[2] != '':
             label = urllib.parse.unquote_plus(parts[2])
 
         if len(parts) >= 4:
             options = cls._parse_options(parts[3])
 
-        # Validate field type
-        valid_types = {'text', 'email', 'password', 'number', 'date', 'url',
-                      'textarea', 'select', 'checkbox', 'file'}
-        if field_type not in valid_types:
-            raise ValueError(f'Invalid field type: {field_type} (must be one of {valid_types})')
-
         return cls(name, field_type, label, options)
 
     @staticmethod
     def _parse_options(options_str: str) -> Dict[str, str]:
-        """Parse options string into dictionary."""
-        options = {}
-        for option in options_str.split(','):
-            option = option.strip()
-            if not option:
+        """Parse an options string into a dictionary."""
+        options: Dict[str, str] = {}
+        last_key: Optional[str] = None
+        for segment in options_str.split(','):
+            segment = segment.strip()
+            if not segment:
                 continue
 
-            if '=' in option:
-                key, value = option.split('=', 1)
-                options[key.strip()] = urllib.parse.unquote_plus(value.strip())
+            if '=' in segment:
+                key, value = segment.split('=', 1)
+                key = key.strip().lower()
+                options[key] = urllib.parse.unquote_plus(value.strip())
+                last_key = key
+            elif segment.lower() in FLAG_OPTIONS:
+                options[segment.lower()] = 'true'
+                last_key = None
+            elif last_key is not None:
+                # Continuation of a value that contains a comma
+                options[last_key] += ',' + urllib.parse.unquote_plus(segment)
             else:
-                # Boolean flag (e.g., "required")
-                options[option] = 'true'
+                raise ValueError(f'Unknown option: {segment}')
 
         return options
+
+    def has_flag(self, name: str) -> bool:
+        return name in self.options
 
 
 def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True,
                        add_cancel_button: bool = True, cancel_label: str = 'Cancel') -> str:
     """
-    Generate HTML form from field specifications.
+    Generate an HTML form from field specifications.
 
     Args:
         fields: List of FieldSpec instances
@@ -91,7 +120,6 @@ def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True,
     Returns:
         HTML form string
     """
-    # Check if any file fields exist
     has_file_field = any(f.field_type == 'file' for f in fields)
     enctype = ' enctype="multipart/form-data"' if has_file_field else ''
 
@@ -104,7 +132,8 @@ def generate_form_html(fields: List[FieldSpec], add_submit_button: bool = True,
         form_parts.append('    <button type="submit">Submit</button>')
 
     if add_cancel_button:
-        form_parts.append(f'    <button type="submit" name="_cancel" value="1" class="cancel" formnovalidate>{escape_html(cancel_label)}</button>')
+        form_parts.append('    <button type="submit" name="_cancel" value="1" class="cancel" '
+                          f'formnovalidate>{escape_html(cancel_label)}</button>')
 
     form_parts.append('</form>')
 
@@ -125,180 +154,218 @@ def generate_field_html(field: FieldSpec) -> str:
 
     if field.field_type == 'textarea':
         return label_html + '\n' + _generate_textarea(field)
-    elif field.field_type == 'select':
+    if field.field_type == 'select':
         return label_html + '\n' + _generate_select(field)
-    elif field.field_type == 'checkbox':
+    if field.field_type == 'checkbox':
         return _generate_checkbox(field)
-    else:
-        return label_html + '\n' + _generate_input(field)
+    if field.field_type == 'radio':
+        return _generate_radio_group(field)
+    if field.field_type == 'hidden':
+        return _generate_input(field)
+    return label_html + '\n' + _generate_input(field)
+
+
+def _common_attrs(field: FieldSpec) -> Dict[str, Optional[str]]:
+    attrs: Dict[str, Optional[str]] = {}
+    for flag in ('required', 'readonly', 'disabled', 'autofocus'):
+        if field.has_flag(flag):
+            attrs[flag] = None
+    return attrs
 
 
 def _generate_input(field: FieldSpec) -> str:
-    """Generate HTML for input elements."""
-    attrs = {
+    """Generate HTML for <input> elements."""
+    attrs: Dict[str, Optional[str]] = {
         'type': field.field_type,
         'name': field.name,
         'id': field.name,
     }
 
-    # Add common attributes from options
-    for key in ['placeholder', 'min', 'max', 'step', 'accept', 'pattern']:
+    for key in _INPUT_PASSTHROUGH:
         if key in field.options:
             attrs[key] = field.options[key]
 
-    if 'required' in field.options:
-        attrs['required'] = None
+    if 'value' in field.options and field.field_type != 'file':
+        attrs['value'] = field.options['value']
 
-    if 'multiple' in field.options and field.field_type == 'file':
+    attrs.update(_common_attrs(field))
+
+    if field.has_flag('multiple') and field.field_type in ('file', 'email'):
         attrs['multiple'] = None
 
-    return '    ' + build_tag('input', attrs, self_closing=True)
+    return '    ' + build_tag('input', attrs)
 
 
 def _generate_textarea(field: FieldSpec) -> str:
-    """Generate HTML for textarea elements."""
-    attrs = {
+    """Generate HTML for <textarea> elements."""
+    attrs: Dict[str, Optional[str]] = {
         'name': field.name,
         'id': field.name,
     }
 
-    for key in ['rows', 'cols', 'placeholder']:
+    for key in ('rows', 'cols', 'placeholder', 'minlength', 'maxlength'):
         if key in field.options:
             attrs[key] = field.options[key]
 
-    if 'required' in field.options:
-        attrs['required'] = None
+    attrs.update(_common_attrs(field))
 
-    return '    ' + build_tag('textarea', attrs) + '</textarea>'
+    content = escape_html(field.options.get('value', ''))
+    return '    ' + build_tag('textarea', attrs) + content + '</textarea>'
+
+
+def _option_values(field: FieldSpec) -> List[str]:
+    raw = field.options.get('options', '')
+    return [o.strip() for o in raw.split('|')] if raw else []
+
+
+def _selected_values(field: FieldSpec) -> List[str]:
+    value = field.options.get('value')
+    if value is None:
+        return []
+    if field.has_flag('multiple'):
+        return [v.strip() for v in value.split('|')]
+    return [value]
 
 
 def _generate_select(field: FieldSpec) -> str:
-    """Generate HTML for select elements."""
-    attrs = {
+    """Generate HTML for <select> elements."""
+    attrs: Dict[str, Optional[str]] = {
         'name': field.name,
         'id': field.name,
     }
-
-    if 'required' in field.options:
-        attrs['required'] = None
-
-    if 'multiple' in field.options:
+    attrs.update(_common_attrs(field))
+    if field.has_flag('multiple'):
         attrs['multiple'] = None
 
-    select_html = '    ' + build_tag('select', attrs) + '\n'
-
-    # Parse options
-    if 'options' in field.options:
-        option_values = field.options['options'].split('|')
-        for option in option_values:
-            option = option.strip()
-            select_html += f'        <option value="{escape_attr(option)}">{escape_html(option)}</option>\n'
-
-    select_html += '    </select>'
-    return select_html
+    selected = _selected_values(field)
+    lines = ['    ' + build_tag('select', attrs)]
+    for option in _option_values(field):
+        flag = ' selected' if option in selected else ''
+        lines.append(f'        <option value="{escape_attr(option)}"{flag}>{escape_html(option)}</option>')
+    lines.append('    </select>')
+    return '\n'.join(lines)
 
 
 def _generate_checkbox(field: FieldSpec) -> str:
-    """Generate HTML for checkbox elements."""
-    attrs = {
+    """Generate HTML for a checkbox with a trailing label."""
+    attrs: Dict[str, Optional[str]] = {
         'type': 'checkbox',
         'name': field.name,
         'id': field.name,
         'value': field.options.get('value', 'on'),
     }
+    if field.has_flag('checked'):
+        attrs['checked'] = None
+    attrs.update(_common_attrs(field))
 
-    if 'required' in field.options:
-        attrs['required'] = None
-
-    checkbox_html = '    ' + build_tag('input', attrs, self_closing=True)
+    checkbox_html = '    ' + build_tag('input', attrs)
     label_html = f' <label for="{escape_attr(field.name)}">{escape_html(field.label)}</label>'
-
     return checkbox_html + label_html
 
 
-def build_tag(tag: str, attrs: Dict[str, Optional[str]], self_closing: bool = False) -> str:
+def _generate_radio_group(field: FieldSpec) -> str:
+    """Generate HTML for a group of radio buttons inside a fieldset."""
+    selected = field.options.get('value')
+    lines = ['    <fieldset>', f'        <legend>{escape_html(field.label)}</legend>']
+    for i, option in enumerate(_option_values(field)):
+        option_id = f'{field.name}_{i}'
+        attrs: Dict[str, Optional[str]] = {
+            'type': 'radio',
+            'name': field.name,
+            'id': option_id,
+            'value': option,
+        }
+        if option == selected:
+            attrs['checked'] = None
+        if field.has_flag('required'):
+            attrs['required'] = None
+        if field.has_flag('disabled'):
+            attrs['disabled'] = None
+        lines.append('        ' + build_tag('input', attrs)
+                     + f' <label for="{escape_attr(option_id)}">{escape_html(option)}</label>')
+    lines.append('    </fieldset>')
+    return '\n'.join(lines)
+
+
+def build_tag(tag: str, attrs: Dict[str, Optional[str]]) -> str:
     """
-    Build an HTML tag with attributes.
+    Build an HTML start tag with attributes.
 
     Args:
         tag: Tag name
         attrs: Dictionary of attributes (value=None for boolean attributes)
-        self_closing: Whether to make tag self-closing
 
     Returns:
-        HTML tag string
+        HTML start tag string
     """
     attr_parts = []
     for key, value in attrs.items():
         if value is None:
-            # Boolean attribute
             attr_parts.append(key)
         else:
             attr_parts.append(f'{key}="{escape_attr(value)}"')
 
     attr_str = ' ' + ' '.join(attr_parts) if attr_parts else ''
-    if self_closing:
-        return f'<{tag}{attr_str}>'
-    else:
-        return f'<{tag}{attr_str}>'
+    return f'<{tag}{attr_str}>'
 
 
-def escape_html(text: str) -> str:
-    """Escape HTML special characters."""
+def escape_html(text: Optional[str]) -> str:
+    """Escape HTML special characters in text content."""
     if not text:
         return ''
-    return (text
-            .replace('&', '&amp;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;')
-            .replace('"', '&quot;')
-            .replace("'", '&#x27;'))
+    return html_mod.escape(text, quote=True)
 
 
-def escape_attr(text: str) -> str:
-    """Escape HTML attribute values."""
+def escape_attr(text: Optional[str]) -> str:
+    """Escape HTML special characters in an attribute value."""
     if not text:
         return ''
-    return (text
-            .replace('&', '&amp;')
-            .replace('"', '&quot;')
-            .replace('<', '&lt;')
-            .replace('>', '&gt;'))
+    return html_mod.escape(text, quote=True)
 
 
 def dict_to_fieldspec(field_dict: Dict) -> FieldSpec:
     """
-    Convert a field dictionary to a FieldSpec object.
+    Convert a field dictionary (as used by the Python API) to a FieldSpec.
 
     Args:
         field_dict: Dictionary with field properties (name, type, label, etc.)
 
     Returns:
         FieldSpec instance
+
+    Raises:
+        ValueError: If the name or type is missing or invalid
     """
-    name = field_dict['name']
-    field_type = field_dict['type']
+    name = field_dict.get('name')
+    field_type = str(field_dict.get('type', '')).lower()
+    if not name:
+        raise ValueError('Field is missing a name')
+    if field_type not in VALID_TYPES:
+        raise ValueError(f'Invalid field type: {field_type!r} for field {name!r} '
+                         f'(must be one of {", ".join(sorted(VALID_TYPES))})')
+
     label = field_dict.get('label')
 
-    # Convert remaining properties to options dict (as strings)
-    options = {}
-    for key in ['placeholder', 'min', 'max', 'step', 'accept', 'pattern',
-                'rows', 'cols', 'value']:
-        if key in field_dict and field_dict[key] is not None:
+    options: Dict[str, str] = {}
+    for key in ('placeholder', 'min', 'max', 'step', 'accept', 'pattern',
+                'rows', 'cols', 'minlength', 'maxlength', 'autocomplete'):
+        if field_dict.get(key) is not None:
             options[key] = str(field_dict[key])
 
-    # Handle required (bool -> 'true' string presence)
-    if field_dict.get('required'):
-        options['required'] = 'true'
+    for flag in FLAG_OPTIONS:
+        if field_dict.get(flag):
+            options[flag] = 'true'
 
-    # Handle multiple (bool -> 'true' string presence)
-    if field_dict.get('multiple'):
-        options['multiple'] = 'true'
+    value = field_dict.get('value')
+    if value is not None:
+        if isinstance(value, (list, tuple)):
+            options['value'] = '|'.join(str(v) for v in value)
+        else:
+            options['value'] = str(value)
 
-    # Handle select options (list -> pipe-separated string)
-    if 'options' in field_dict and field_dict['options']:
-        opts = field_dict['options']
-        if isinstance(opts, list):
+    opts = field_dict.get('options')
+    if opts:
+        if isinstance(opts, (list, tuple)):
             options['options'] = '|'.join(str(o) for o in opts)
         else:
             options['options'] = str(opts)
@@ -315,26 +382,22 @@ def generate_form_html_from_dicts(
     cancel_label: str = 'Cancel'
 ) -> str:
     """
-    Generate complete HTML document from field dictionaries.
+    Generate a complete HTML document from field dictionaries.
 
     This is the entry point for the Python API.
 
     Args:
         fields: List of field dictionaries
         title: Page title
-        text: Instructional text above form
-        add_submit: Whether to add submit button
-        add_cancel: Whether to add cancel button
+        text: Instructional text above the form
+        add_submit: Whether to add a submit button
+        add_cancel: Whether to add a cancel button
         cancel_label: Label text for the cancel button
 
     Returns:
         Complete HTML document string
     """
-    # Convert dicts to FieldSpec objects
     field_specs = [dict_to_fieldspec(f) for f in fields]
-
-    # Generate form HTML
     form_html = generate_form_html(field_specs, add_submit_button=add_submit,
                                    add_cancel_button=add_cancel, cancel_label=cancel_label)
-
     return render_page(form_html, title=title, text=text)
