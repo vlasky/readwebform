@@ -628,6 +628,10 @@ python -m pytest tests/ -v --ignore=tests/test_integration.py
 python -m pytest tests/test_integration.py -v
 ```
 
+### Demo GIF
+
+`demo.gif` is generated, not screen-recorded: `demo/record_demo.py` runs a real `readwebform` process, drives Chromium through the form with Playwright, and records both panes in one page. See [demo/README.md](demo/README.md).
+
 ### Design Document
 
 See [SPEC.md](SPEC.md) for the full design specification. This document covers architecture, security model, validation rules, and implementation details. It's intended for contributors and anyone wanting to implement `readwebform` in another programming language.

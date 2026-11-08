@@ -71,6 +71,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501", "B011", "SIM117", "PLW1510", "RUF059", "RUF043"]
+"demo/*" = ["E501"]  # embedded HTML/CSS template
 
 [tool.pyright]
 include = ["src"]
