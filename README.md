@@ -41,7 +41,7 @@ Your browser opens the form. The command **blocks** until the form is submitted 
 
 > **Tip:** Run `readwebform --help` to see all available options. Note that running `readwebform` with no arguments will wait for HTML input on stdin.
 
-The browser is not launched, and only the URL is printed, when no desktop is detected (CI, an SSH session, no `DISPLAY`), when `--host` is not a loopback address (the URL is for someone else), or when `--url-file` is used (you are handling the URL yourself). `--no-launch-browser` or `READWEBFORM_NO_BROWSER=1` always suppresses it; `--launch-browser` always forces it. The Python API never opens a browser unless you pass `launch_browser=True`.
+The browser is not launched, and only the URL is printed, when no desktop is detected (CI, an SSH session, no `DISPLAY`), when `--host` is not a loopback address (the URL is for someone else), or when `--url-file` is used (you are handling the URL yourself). `--no-launch-browser` always suppresses it, `READWEBFORM_NO_BROWSER=1` disables the automatic launch, and `--launch-browser` always forces it. Launch reporting is best effort: a browser that fails after it has been handed the URL is not detected. The Python API never opens a browser unless you pass `launch_browser=True`.
 
 ## Table of Contents
 
@@ -152,7 +152,7 @@ cat form.html | readwebform
 | `--env-prefix <prefix>` | Prefix for environment variable names (default: `WEBFORM_`) |
 | `--url-file <path>` | Write the form URL to this file |
 | `--launch-browser [path]` | Open the form in a browser even when no desktop is detected, optionally with a specific browser executable |
-| `--no-launch-browser` | Never open a browser; just print the URL. Setting the environment variable `READWEBFORM_NO_BROWSER=1` has the same effect for every run |
+| `--no-launch-browser` | Never open a browser; just print the URL. The environment variable `READWEBFORM_NO_BROWSER=1` disables the automatic launch for every run (an explicit `--launch-browser` still opens one) |
 | `--no-submit-button` | Disable automatic submit button in declarative mode |
 | `--no-cancel-button` | Disable cancel button in declarative mode |
 | `--submit-label <text>` | Label for the submit button (default: "Submit") |

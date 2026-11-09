@@ -2,6 +2,7 @@
 Core orchestration for readwebform: load, validate, serve, output.
 """
 
+import ipaddress
 import sys
 import traceback
 from typing import Optional
@@ -127,11 +128,18 @@ def run_readwebform(args) -> int:
         return EXIT_INTERNAL_ERROR
 
 
-LOOPBACK_HOSTS = ('127.0.0.1', '::1', 'localhost')
-
-
 def is_loopback_host(host: str) -> bool:
-    return host in LOOPBACK_HOSTS or host.startswith('127.')
+    """
+    True for 'localhost' and any loopback IP literal (127.0.0.0/8, ::1 in any
+    spelling). Other hostnames are treated as non-loopback without a DNS
+    lookup, so a name like 127.example.invalid does not count.
+    """
+    if host == 'localhost':
+        return True
+    try:
+        return ipaddress.ip_address(host.strip('[]')).is_loopback
+    except ValueError:
+        return False
 
 
 def resolve_browser_launch(args) -> Optional[str]:

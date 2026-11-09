@@ -238,9 +238,9 @@ class TestBrowserLaunchDecision:
     def test_non_loopback_host_suppresses_auto_launch(self, monkeypatch):
         from readwebform import core
         monkeypatch.setattr(core, 'gui_available', lambda: True)
-        for host in ('0.0.0.0', '::', '192.168.1.5', 'myhost.local'):
+        for host in ('0.0.0.0', '::', '192.168.1.5', 'myhost.local', '127.example.invalid'):
             assert core.resolve_browser_launch(self._args('--host', host)) is None
-        for host in ('127.0.0.1', '127.0.0.2', '::1', 'localhost'):
+        for host in ('127.0.0.1', '127.0.0.2', '::1', '0:0:0:0:0:0:0:1', '[::1]', 'localhost'):
             assert core.resolve_browser_launch(self._args('--host', host)) == ''
 
     def test_url_file_suppresses_auto_launch(self, monkeypatch, tmp_path):

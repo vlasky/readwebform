@@ -4,7 +4,7 @@
 
 ### Changed
 
-- **Behaviour change:** on a desktop the CLI now opens the browser by default. Pass `--no-launch-browser` or set `READWEBFORM_NO_BROWSER=1` to restore the 0.3.0 behaviour of only printing the URL. The browser is not opened when no desktop is detected (`CI`, `SSH_CONNECTION`/`SSH_TTY`, or no `DISPLAY`/`WAYLAND_DISPLAY` on Unix), when `--host` is not a loopback address, or when `--url-file` is given. `--launch-browser` still forces a launch. The Python API is unchanged (`launch_browser=False`)
+- **Behaviour change:** on a desktop the CLI now opens the browser by default. Pass `--no-launch-browser`, or set `READWEBFORM_NO_BROWSER=1` to disable the automatic launch, to restore the 0.3.0 behaviour of only printing the URL. The browser is not opened when no desktop is detected (`CI`, `SSH_CONNECTION`/`SSH_TTY`, or no `DISPLAY`/`WAYLAND_DISPLAY` on Unix), when `--host` is not a loopback address, or when `--url-file` is given. `--launch-browser` still forces a launch. The Python API is unchanged (`launch_browser=False`)
 - stderr now says when the browser is being opened and when the launch failed
 - README examples quote field specs that contain `|`, `*` or spaces (the unquoted forms did not run in a shell) and lead with plain quoted labels instead of `+`-encoded ones
 

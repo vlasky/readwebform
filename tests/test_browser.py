@@ -84,3 +84,17 @@ class TestGuiAvailable:
         for platform in ('darwin', 'win32'):
             monkeypatch.setattr(browser.sys, 'platform', platform)
             assert browser.gui_available() is True
+
+
+@posix_only
+def test_custom_launcher_exit_status_is_reported(tmp_path):
+    from readwebform.browser import launch_browser
+    ok = tmp_path / 'ok.sh'
+    ok.write_text('#!/bin/sh\nexit 0\n')
+    bad = tmp_path / 'bad.sh'
+    bad.write_text('#!/bin/sh\nexit 3\n')
+    for script in (ok, bad):
+        script.chmod(0o755)
+    assert launch_browser('http://example.invalid/', str(ok)) is True
+    assert launch_browser('http://example.invalid/', str(bad)) is False
+    assert launch_browser('http://example.invalid/', str(tmp_path / 'missing')) is False

@@ -20,12 +20,13 @@ _DEFAULT_LAUNCHER = (
     'sys.exit(0 if webbrowser.open(sys.argv[1]) else 1)\n'
 )
 
-# How long to wait for the launcher child to report an immediate failure
-# (no browser found). Background browsers return within this time; a child
-# still running afterwards is treated as success so the caller is not held
-# up. Terminal browsers (lynx, w3m) need a tty and are not supported by
-# --launch-browser: the URL is always printed to stderr for manual use.
-_LAUNCH_WAIT = 0.3
+# How long to wait for a launcher child to report an immediate failure (no
+# browser found, bad executable). Background browsers hand off within this
+# time; a child still running afterwards is treated as success so the caller
+# is not held up. Reporting is therefore best effort. Terminal browsers
+# (lynx, w3m) need a tty and are not supported by --launch-browser: the URL
+# is always printed to stderr for manual use.
+_LAUNCH_WAIT = 1.0
 
 
 def gui_available() -> bool:
@@ -96,11 +97,19 @@ def _launch_default_browser(url: str) -> bool:
 
 
 def _launch_custom_browser(url: str, browser_path: str) -> bool:
-    """Open the URL with a specific browser executable."""
+    """
+    Open the URL with a specific browser executable.
+
+    Reporting is best effort: a launcher that fails within _LAUNCH_WAIT is
+    reported; one that fails later is not observed.
+    """
     try:
         # No shell (prevents injection); the child's output cannot reach our stdout
-        _spawn_detached([browser_path, url])
-        return True
+        proc = _spawn_detached([browser_path, url])
     except Exception as e:
         print(f'Warning: Failed to launch {browser_path}: {e}', file=sys.stderr)
         return False
+    try:
+        return proc.wait(timeout=_LAUNCH_WAIT) == 0
+    except subprocess.TimeoutExpired:
+        return True  # still running: treat as launched
