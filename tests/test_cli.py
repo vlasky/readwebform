@@ -260,3 +260,8 @@ class TestBrowserLaunchDecision:
         from readwebform import core
         monkeypatch.setattr(core, 'gui_available', lambda: True)
         assert core.resolve_browser_launch(self._args('--no-launch-browser')) is None
+
+
+    def test_url_host_option(self):
+        args = self._args('--url-host', 'forms.example.net')
+        assert args.url_host == 'forms.example.net'

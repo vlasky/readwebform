@@ -229,11 +229,13 @@ Controlled by `--reset-timeout-on-error` (default `true`):
       http://127.0.0.1:49162/readform_7a1f3c
 ```
     
--   When bound to all interfaces (`--host 0.0.0.0` or `::`), the URL shown uses the machine's primary network address (found by asking the kernel which local address routes to the default gateway), falling back to the hostname, so it can be shared.
+-   When bound to all interfaces (`--host 0.0.0.0` or `::`), the URL shown uses a best-effort guess of the machine's address (the local address the kernel would use to reach a documentation address via the default route), falling back to the hostname. `--url-host` overrides it.
 
 -   By default the **system default browser is opened automatically when a desktop is available**. "No desktop" means any of: `CI` set, `SSH_CONNECTION` or `SSH_TTY` set, `READWEBFORM_NO_BROWSER` set, or (on Unix other than macOS) neither `DISPLAY` nor `WAYLAND_DISPLAY` set. In that case only the URL is printed.
 
--   `--no-launch-browser` never opens a browser. `--launch-browser` always opens one:
+-   The browser is also not opened automatically when `--host` is not a loopback address (the URL is for someone else) or when `--url-file` is given (the caller handles the URL). `READWEBFORM_NO_BROWSER` disables the automatic launch.
+
+-   `--no-launch-browser` never opens a browser. `--launch-browser` always opens one, overriding every rule above:
     
     -   With no argument → opens using the **system default browser**.
         

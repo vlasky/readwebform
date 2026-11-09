@@ -152,14 +152,23 @@ def main() -> int:
          '--url-file', str(url_file), '--upload-dir', str(workdir / 'uploads')],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
     )
+    video_path = None
     try:
         deadline = time.time() + 10
-        while not url_file.exists() and time.time() < deadline:
+        url = ''
+        while not url and time.time() < deadline:
             if proc.poll() is not None:
                 print('readwebform exited early:', proc.stderr.read(), file=sys.stderr)
                 return 1
-            time.sleep(0.05)
-        url = url_file.read_text().strip()
+            if url_file.exists():
+                url = url_file.read_text().strip()
+            if not url:
+                time.sleep(0.05)
+        if not url:
+            proc.kill()
+            _, err = proc.communicate(timeout=5)
+            print('readwebform did not report a URL within 10 s:', err, file=sys.stderr)
+            return 1
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=not args.headed)
@@ -213,24 +222,27 @@ def main() -> int:
             context.close()  # flushes the video
             video_path = Path(page.video.path())
             browser.close()
+        out = Path(args.out)
+        cmd = [
+            'ffmpeg', '-loglevel', 'error', '-y', '-ss', '0.4', '-i', str(video_path),
+            '-vf', f'fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos,'
+                   'split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];'
+                   '[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
+            '-loop', '0', str(out),
+        ]
+        subprocess.run(cmd, check=True)
+        if args.keep_video:
+            shutil.copy(video_path, out.with_suffix('.webm'))
+        print(f'wrote {out} ({out.stat().st_size // 1024} KB)')
+        return 0
     finally:
         if proc.poll() is None:
             proc.kill()
-
-    out = Path(args.out)
-    cmd = [
-        'ffmpeg', '-loglevel', 'error', '-y', '-ss', '0.4', '-i', str(video_path),
-        '-vf', f'fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos,'
-               'split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];'
-               '[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
-        '-loop', '0', str(out),
-    ]
-    subprocess.run(cmd, check=True)
-    if args.keep_video:
-        shutil.copy(video_path, out.with_suffix('.webm'))
-    shutil.rmtree(workdir, ignore_errors=True)
-    print(f'wrote {out} ({out.stat().st_size // 1024} KB)')
-    return 0
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 if __name__ == '__main__':

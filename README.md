@@ -137,7 +137,8 @@ cat form.html | readwebform
 | `--field <spec>` | Declaratively define form fields (repeatable) |
 | `--title <string>` | Page title, shown as a heading above the form and in the browser tab (an existing `<title>` in a complete document is kept) |
 | `--text <string>` | Instructional text shown above the form |
-| `--host <ip>` | IPv4 or IPv6 address to bind to (default: `127.0.0.1`). With `0.0.0.0` or `::` the printed URL uses your machine's network address so it can be shared |
+| `--host <ip>` | IPv4 or IPv6 address to bind to (default: `127.0.0.1`). With `0.0.0.0` or `::` the printed URL uses a best-effort guess of your machine's network address |
+| `--url-host <host>` | Host name or address to put in the printed URL, for when the guess is wrong (VPNs, several interfaces) or you want a DNS name |
 | `--port <int>` | TCP port (default: random available port) |
 | `--cert <path>` | SSL certificate file (PEM) for HTTPS |
 | `--key <path>` | SSL private key file (PEM) for HTTPS |
@@ -172,7 +173,7 @@ Quote a spec when it contains spaces or shell characters such as `|` and `*`:
 --field "country:select:Country:options=US|UK|CA"
 ```
 
-Labels and option values are also URL-decoded, so in an unquoted spec `+` stands for a space (`Full+Name`) and `%2C` for a literal comma. A label cannot contain a colon.
+Labels and option values are always URL-decoded, quoted or not: `+` becomes a space (`Full+Name`), `%2C` a literal comma, `%3A` a literal colon, and a literal plus sign must be written `%2B` (`"lang:text:C%2B%2B"`).
 
 **Supported types:** `text`, `email`, `password`, `number`, `date`, `time`, `datetime-local`, `month`, `week`, `url`, `tel`, `search`, `range`, `color`, `hidden`, `textarea`, `select`, `radio`, `checkbox`, `file`
 

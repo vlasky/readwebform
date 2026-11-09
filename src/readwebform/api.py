@@ -164,7 +164,8 @@ def read_webform(
     cert_file: Optional[str] = None,
     key_file: Optional[str] = None,
     url_file: Optional[str] = None,
-    upload_dir: Optional[str] = None
+    upload_dir: Optional[str] = None,
+    url_host: Optional[str] = None
 ) -> FormResult:
     """
     Display a web form and wait for user submission.
@@ -185,6 +186,8 @@ def read_webform(
         url_file: If given, the form URL is written to this file once listening
         upload_dir: Directory for uploaded files (default: a temporary directory
             created on first upload and removed if left empty)
+        url_host: Host to put in the form URL (default: the bind host, or a
+            best-effort guess of this machine's address for a wildcard bind)
 
     Returns:
         FormResult with success flag, fields dict, and files dict
@@ -214,7 +217,8 @@ def read_webform(
         reset_timeout_on_error=reset_timeout_on_error,
         cert_file=cert_file,
         key_file=key_file,
-        upload_dir=upload_dir
+        upload_dir=upload_dir,
+        url_host=url_host
     )
 
     # Inject CSRF token

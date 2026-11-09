@@ -485,3 +485,14 @@ class TestLaunchFeedback:
         err = capsys.readouterr().err
         assert 'Opening the form' not in err
         assert 'Open this URL' in err
+
+
+class TestUrlHostOverride:
+    def test_url_host_overrides_display_host(self):
+        server = make_server('<form></form>', url_host='forms.example.net')
+        server.host = '0.0.0.0'
+        assert server._build_url(8080) == 'http://forms.example.net:8080' + server.endpoint
+
+    def test_url_host_applies_to_loopback_bind_too(self):
+        server = make_server('<form></form>', url_host='localhost')
+        assert server._build_url(8080) == 'http://localhost:8080' + server.endpoint

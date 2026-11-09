@@ -78,6 +78,7 @@ def run_readwebform(args) -> int:
             cert_file=getattr(args, 'cert', None),
             key_file=getattr(args, 'key', None),
             upload_dir=getattr(args, 'upload_dir', None),
+            url_host=getattr(args, 'url_host', None),
         )
         server.html = inject_csrf_token(html, server.csrf_token, server.endpoint)
 

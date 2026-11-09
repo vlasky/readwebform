@@ -81,6 +81,12 @@ class ReadWebFormArgumentParser:
             help='TCP port (default: auto-select a free port)'
         )
         server_group.add_argument(
+            '--url-host',
+            metavar='<host>',
+            help='Host name or address to put in the printed URL (default: the bind address, '
+                 'or a best-effort guess of this machine\'s address when binding to all interfaces)'
+        )
+        server_group.add_argument(
             '--cert',
             metavar='<path>',
             help='Path to SSL certificate file (PEM format) for HTTPS'

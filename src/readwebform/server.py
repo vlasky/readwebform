@@ -334,10 +334,13 @@ def _primary_address(ipv6: bool = False) -> Optional[str]:
     Best-effort address of the interface that carries default-route traffic.
 
     Connecting a UDP socket sends nothing; it only asks the kernel which local
-    address it would use. Returns None when no route exists.
+    address it would use for the target. The targets are documentation
+    addresses (TEST-NET-1 and 2001:db8::/32) so the lookup follows the default
+    route rather than a private-range route such as a VPN's 10/8. Returns None
+    when no route exists. The answer is a guess: a full-tunnel VPN still wins.
     """
     family = socket.AF_INET6 if ipv6 else socket.AF_INET
-    target = ('2001:db8::1', 9) if ipv6 else ('10.255.255.255', 9)
+    target = ('2001:db8::1', 9) if ipv6 else ('192.0.2.1', 9)
     try:
         with socket.socket(family, socket.SOCK_DGRAM) as probe:
             probe.connect(target)
@@ -403,7 +406,8 @@ class FormServer:
         reset_timeout_on_error: bool = True,
         cert_file: Optional[str] = None,
         key_file: Optional[str] = None,
-        upload_dir: Optional[str] = None
+        upload_dir: Optional[str] = None,
+        url_host: Optional[str] = None
     ):
         """
         Initialize form server.
@@ -420,6 +424,9 @@ class FormServer:
             key_file: Path to SSL private key file (PEM format)
             upload_dir: Directory for uploaded files (None = a temporary
                 directory created on first upload and removed if left empty)
+            url_host: Host to put in the printed URL. Defaults to the bind
+                host, or for a wildcard bind to a best-effort guess of this
+                machine's outbound address.
         """
         self.html = html
         self.host = host
@@ -439,6 +446,7 @@ class FormServer:
 
         self.upload_dir: Optional[str] = upload_dir
         self._created_upload_dir = False
+        self.url_host = url_host
 
         # Outcome state, guarded by _lock
         self._lock = threading.Lock()
@@ -577,7 +585,9 @@ class FormServer:
         return self.host in ('', '0.0.0.0', '::')
 
     def _display_host(self) -> str:
-        """The host to put in the URL: a reachable address when bound to all interfaces."""
+        """The host to put in the URL: an explicit url_host, the bind host, or a best-effort guess."""
+        if self.url_host:
+            return self.url_host
         if not self.is_wildcard_host():
             return self.host
         address = _primary_address(ipv6=(self.host == '::'))
@@ -622,9 +632,10 @@ class FormServer:
 
         try:
             print(f'\nOpen this URL in your browser:\n  {self._url}', file=sys.stderr)
-            if self.is_wildcard_host():
-                print('  (listening on all interfaces; this address should be reachable '
-                      'from other machines on your network)', file=sys.stderr)
+            if self.is_wildcard_host() and not self.url_host:
+                print('  (listening on all interfaces; the address above is this machine\'s '
+                      'outbound address, a best-effort guess. If others cannot reach it, '
+                      'pass --url-host with the right one.)', file=sys.stderr)
             print(file=sys.stderr)
 
             if url_file:
