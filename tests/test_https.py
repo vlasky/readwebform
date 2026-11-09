@@ -379,7 +379,7 @@ class TestHTTPSCLI:
         """Test that --cert without --key fails."""
         result = subprocess.run(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--field', 'test:text:Test',
                 '--cert', '/path/to/cert.pem',
             ],
@@ -395,7 +395,7 @@ class TestHTTPSCLI:
         """Test that --key without --cert fails."""
         result = subprocess.run(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--field', 'test:text:Test',
                 '--key', '/path/to/key.pem',
             ],
@@ -414,7 +414,7 @@ class TestHTTPSCLI:
         # Run with very short timeout to exit quickly
         result = subprocess.run(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--field', 'test:text:Test',
                 '--cert', cert_path,
                 '--key', key_path,
@@ -435,7 +435,7 @@ class TestHTTPSCLI:
         """Test CLI with non-existent certificate file."""
         result = subprocess.run(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--field', 'test:text:Test',
                 '--cert', '/nonexistent/cert.pem',
                 '--key', '/nonexistent/key.pem',

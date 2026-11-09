@@ -329,6 +329,26 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         self._send_html(code, _status_page(title, 'error', '❌ ' + title, message, back))
 
 
+def _primary_address(ipv6: bool = False) -> Optional[str]:
+    """
+    Best-effort address of the interface that carries default-route traffic.
+
+    Connecting a UDP socket sends nothing; it only asks the kernel which local
+    address it would use. Returns None when no route exists.
+    """
+    family = socket.AF_INET6 if ipv6 else socket.AF_INET
+    target = ('2001:db8::1', 9) if ipv6 else ('10.255.255.255', 9)
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect(target)
+            address = probe.getsockname()[0]
+    except OSError:
+        return None
+    if address in ('0.0.0.0', '::'):
+        return None
+    return address
+
+
 def _unlink_all(paths):
     for path in paths:
         try:
@@ -553,9 +573,22 @@ class FormServer:
             raise
         return context
 
+    def is_wildcard_host(self) -> bool:
+        return self.host in ('', '0.0.0.0', '::')
+
+    def _display_host(self) -> str:
+        """The host to put in the URL: a reachable address when bound to all interfaces."""
+        if not self.is_wildcard_host():
+            return self.host
+        address = _primary_address(ipv6=(self.host == '::'))
+        if address:
+            return address
+        return socket.gethostname()
+
     def _build_url(self, port: int) -> str:
         protocol = 'https' if self.use_ssl else 'http'
-        url_host = f'[{self.host}]' if ':' in self.host else self.host
+        host = self._display_host()
+        url_host = f'[{host}]' if ':' in host else host
         return f'{protocol}://{url_host}:{port}{self.endpoint}'
 
     def serve(self, launch_browser_path: Optional[str] = None,
@@ -588,7 +621,11 @@ class FormServer:
         started = False
 
         try:
-            print(f'\nOpen this URL in your browser:\n  {self._url}\n', file=sys.stderr)
+            print(f'\nOpen this URL in your browser:\n  {self._url}', file=sys.stderr)
+            if self.is_wildcard_host():
+                print('  (listening on all interfaces; this address should be reachable '
+                      'from other machines on your network)', file=sys.stderr)
+            print(file=sys.stderr)
 
             if url_file:
                 with open(url_file, 'w', encoding='utf-8') as f:

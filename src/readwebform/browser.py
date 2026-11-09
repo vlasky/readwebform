@@ -9,6 +9,7 @@ short-lived Python child that calls ``webbrowser.open``. Nothing in this
 process's file descriptors is touched.
 """
 
+import os
 import subprocess
 import sys
 import webbrowser
@@ -25,6 +26,24 @@ _DEFAULT_LAUNCHER = (
 # up. Terminal browsers (lynx, w3m) need a tty and are not supported by
 # --launch-browser: the URL is always printed to stderr for manual use.
 _LAUNCH_WAIT = 0.3
+
+
+def gui_available() -> bool:
+    """
+    Guess whether a browser can be opened on a desktop the user is looking at.
+
+    False in CI (``CI`` set), over SSH (``SSH_CONNECTION``/``SSH_TTY`` set), when
+    ``READWEBFORM_NO_BROWSER`` is set, and on Unix without ``DISPLAY`` or
+    ``WAYLAND_DISPLAY``. True on macOS and Windows otherwise.
+    """
+    env = os.environ
+    if env.get('CI') or env.get('READWEBFORM_NO_BROWSER'):
+        return False
+    if env.get('SSH_CONNECTION') or env.get('SSH_TTY'):
+        return False
+    if sys.platform in ('darwin', 'win32', 'cygwin'):
+        return True
+    return bool(env.get('DISPLAY') or env.get('WAYLAND_DISPLAY'))
 
 
 def launch_browser(url: str, browser_path: Optional[str] = None) -> bool:

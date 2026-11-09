@@ -581,7 +581,7 @@ class TestCLIProcessBehavior:
 
         result = subprocess.run(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--field', 'test:text:Test',
                 '--timeout', '3',
             ],
@@ -612,7 +612,7 @@ class TestCLIProcessBehavior:
         # Run readwebform as subprocess
         proc = subprocess.Popen(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--field', 'test:text:Test',
                 '--timeout', '30',
             ],
@@ -646,7 +646,7 @@ class TestCLIProcessBehavior:
         """Test that invalid HTML causes process to exit with error code 2."""
         result = subprocess.run(
             [
-                sys.executable, '-m', 'readwebform',
+                sys.executable, '-m', 'readwebform', '--no-launch-browser',
                 '--html', '<div>No form here</div>',
             ],
             capture_output=True,

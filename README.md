@@ -1,6 +1,6 @@
 # readwebform
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -22,13 +22,10 @@ Interactive shell scripts are clunky. Prompting users with `read` or `readline` 
 ## Quick Start
 
 ```bash
-readwebform \
-  --field name:text:Name:required \
-  --field email:email:Email:required \
-  --launch-browser
+readwebform --field name:text:Name:required --field email:email:Email:required
 ```
 
-The command **blocks** until the form is submitted or the timeout expires, then outputs:
+Your browser opens the form. The command **blocks** until the form is submitted or the timeout expires, then outputs:
 
 ```json
 {
@@ -43,6 +40,8 @@ The command **blocks** until the form is submitted or the timeout expires, then 
 ```
 
 > **Tip:** Run `readwebform --help` to see all available options. Note that running `readwebform` with no arguments will wait for HTML input on stdin.
+
+When no desktop is available (CI, an SSH session, no `DISPLAY`), the browser is not launched and the URL is printed to stderr instead; `--no-launch-browser` forces that behaviour and `--launch-browser` forces a launch.
 
 ## Table of Contents
 
@@ -84,16 +83,15 @@ The command **blocks** until the form is submitted or the timeout expires, then 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/vlasky/readwebform.git
-cd readwebform
+# Run it without installing anything (uv)
+uvx readwebform --field name:text:Name:required
 
-# Install using pip
-pip install .
-
-# Or install in development mode
-pip install -e .
+# Or install the command
+pipx install readwebform      # isolated, recommended
+pip install readwebform       # into the current environment
 ```
+
+For development, clone the repository and run `pip install -e ".[dev]"`.
 
 > **Tip:** On Linux/macOS, pip may install the `readwebform` command to `~/.local/bin`. Ensure this directory is in your `PATH`.
 
@@ -122,7 +120,7 @@ readwebform \
 
 **HTML file:**
 ```bash
-readwebform --htmlfile ./form.html --launch-browser
+readwebform --htmlfile ./form.html
 ```
 
 **From stdin:**
@@ -139,7 +137,7 @@ cat form.html | readwebform
 | `--field <spec>` | Declaratively define form fields (repeatable) |
 | `--title <string>` | Page title, shown as a heading above the form and in the browser tab (an existing `<title>` in a complete document is kept) |
 | `--text <string>` | Instructional text shown above the form |
-| `--host <ip>` | IPv4 or IPv6 address to bind to (default: `127.0.0.1`) |
+| `--host <ip>` | IPv4 or IPv6 address to bind to (default: `127.0.0.1`). With `0.0.0.0` or `::` the printed URL uses your machine's network address so it can be shared |
 | `--port <int>` | TCP port (default: random available port) |
 | `--cert <path>` | SSL certificate file (PEM) for HTTPS |
 | `--key <path>` | SSL private key file (PEM) for HTTPS |
@@ -153,10 +151,13 @@ cat form.html | readwebform
 | `--print-env` | Print sanitized `export` statements to stdout instead of JSON |
 | `--env-prefix <prefix>` | Prefix for environment variable names (default: `WEBFORM_`) |
 | `--url-file <path>` | Write the form URL to this file |
-| `--launch-browser [path]` | Launch default browser, or specify browser path |
+| `--launch-browser [path]` | Open the form in a browser even when no desktop is detected, optionally with a specific browser executable |
+| `--no-launch-browser` | Never open a browser; just print the URL |
 | `--no-submit-button` | Disable automatic submit button in declarative mode |
 | `--no-cancel-button` | Disable cancel button in declarative mode |
+| `--submit-label <text>` | Label for the submit button (default: "Submit") |
 | `--cancel-label <text>` | Label for the cancel button (default: "Cancel") |
+| `--version` | Print the version and exit |
 
 ### Declarative Field Syntax
 
@@ -164,7 +165,14 @@ cat form.html | readwebform
 --field name:type[:label][:options]
 ```
 
-Labels and option values are URL-decoded: use `+` for a space and `%XX` for other characters (e.g., `Full+Name` becomes "Full Name", `%2C` is a literal comma, `%3A` a colon).
+Quote a spec when it contains spaces or shell characters such as `|` and `*`:
+
+```bash
+--field "name:text:Full name:required"
+--field "country:select:Country:options=US|UK|CA"
+```
+
+Labels and option values are also URL-decoded, so in an unquoted spec `+` stands for a space (`Full+Name`) and `%2C` for a literal comma. A label cannot contain a colon.
 
 **Supported types:** `text`, `email`, `password`, `number`, `date`, `time`, `datetime-local`, `month`, `week`, `url`, `tel`, `search`, `range`, `color`, `hidden`, `textarea`, `select`, `radio`, `checkbox`, `file`
 
@@ -185,13 +193,13 @@ Labels and option values are URL-decoded: use `+` for a space and `%XX` for othe
 
 **Examples:**
 ```bash
---field name:text:Full+Name:required,placeholder=Your+name
+--field "name:text:Full name:required,placeholder=Your name"
 --field age:number:Age:min=0,max=120
---field resume:file:Upload+Resume:accept=.pdf,.docx
---field country:select:Country:options=US|UK|CA,value=UK,required
---field plan:radio:Plan:options=free|pro,value=free
---field notify:checkbox:Email+me+updates:checked
---field photos:file:Photos:multiple,accept=image/*
+--field "resume:file:Upload resume:accept=.pdf,.docx"
+--field "country:select:Country:options=US|UK|CA,value=UK,required"
+--field "plan:radio:Plan:options=free|pro,value=free"
+--field "notify:checkbox:Email me updates:checked"
+--field "photos:file:Photos:multiple,accept=image/*"
 ```
 
 ## Output Formats
@@ -471,6 +479,7 @@ if result.success and result.files and 'document' in result.files:
 | `text` | `None` | Instructional text above form |
 | `add_cancel_button` | `True` | Add a Cancel button |
 | `cancel_label` | `'Cancel'` | Label for the Cancel button |
+| `submit_label` | `'Submit'` | Label for the Submit button |
 
 All other parameters same as `read_webform()`.
 
@@ -522,10 +531,10 @@ class UploadedFile:
 ```bash
 readwebform \
   --title "Contact Information" \
+  --submit-label "Send" \
   --field name:text:Name:required \
   --field email:email:Email:required \
-  --field message:textarea:Message:rows=5,required \
-  --launch-browser
+  --field message:textarea:Message:rows=5,required
 ```
 
 ### File Upload with Limits

@@ -45,3 +45,42 @@ def test_default_launcher_output_does_not_reach_stdout():
     assert result.returncode == 0, result.stderr
     assert result.stdout == '{"marker": true}\n'
 
+
+
+class TestGuiAvailable:
+    def _clean(self, monkeypatch):
+        for var in ('CI', 'READWEBFORM_NO_BROWSER', 'SSH_CONNECTION', 'SSH_TTY', 'DISPLAY', 'WAYLAND_DISPLAY'):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_ci_disables(self, monkeypatch):
+        from readwebform.browser import gui_available
+        self._clean(monkeypatch)
+        monkeypatch.setenv('CI', 'true')
+        assert gui_available() is False
+
+    def test_ssh_disables(self, monkeypatch):
+        from readwebform.browser import gui_available
+        self._clean(monkeypatch)
+        monkeypatch.setenv('SSH_CONNECTION', '1.2.3.4 1 5.6.7.8 22')
+        assert gui_available() is False
+
+    def test_opt_out_variable(self, monkeypatch):
+        from readwebform.browser import gui_available
+        self._clean(monkeypatch)
+        monkeypatch.setenv('READWEBFORM_NO_BROWSER', '1')
+        assert gui_available() is False
+
+    def test_linux_needs_display(self, monkeypatch):
+        from readwebform import browser
+        self._clean(monkeypatch)
+        monkeypatch.setattr(browser.sys, 'platform', 'linux')
+        assert browser.gui_available() is False
+        monkeypatch.setenv('DISPLAY', ':0')
+        assert browser.gui_available() is True
+
+    def test_desktop_platforms(self, monkeypatch):
+        from readwebform import browser
+        self._clean(monkeypatch)
+        for platform in ('darwin', 'win32'):
+            monkeypatch.setattr(browser.sys, 'platform', platform)
+            assert browser.gui_available() is True

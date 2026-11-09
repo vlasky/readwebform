@@ -241,3 +241,13 @@ class TestDictToFieldSpec:
         from readwebform.forms import dict_to_fieldspec
         with pytest.raises(ValueError, match='Invalid field type'):
             dict_to_fieldspec({'name': 'n', 'type': 'bogus'})
+
+
+class TestSubmitLabel:
+    def test_custom_submit_label_is_escaped(self):
+        html = generate_form_html([FieldSpec('a', 'text')], submit_label='Ship <it>')
+        assert '<button type="submit">Ship &lt;it&gt;</button>' in html
+
+    def test_quoted_label_with_spaces_and_colon_free_text(self):
+        spec = FieldSpec.parse('notify:checkbox:Notify the team:checked')
+        assert spec.label == 'Notify the team'

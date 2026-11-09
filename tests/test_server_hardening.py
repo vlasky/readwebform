@@ -442,3 +442,30 @@ class TestIdleConnections:
                 pass
             idle.close()
         assert success
+
+
+class TestDisplayURL:
+    def test_loopback_host_is_used_verbatim(self):
+        server = make_server('<form></form>')
+        assert server._display_host() == '127.0.0.1'
+
+    def test_wildcard_host_becomes_reachable_address(self, monkeypatch):
+        from readwebform import server as server_mod
+        server = make_server('<form></form>')
+        server.host = '0.0.0.0'
+        monkeypatch.setattr(server_mod, '_primary_address', lambda ipv6=False: '192.0.2.10')
+        assert server._build_url(8080) == 'http://192.0.2.10:8080' + server.endpoint
+
+    def test_wildcard_host_falls_back_to_hostname(self, monkeypatch):
+        import socket as socket_mod
+
+        from readwebform import server as server_mod
+        server = make_server('<form></form>')
+        server.host = '::'
+        monkeypatch.setattr(server_mod, '_primary_address', lambda ipv6=False: None)
+        assert server._display_host() == socket_mod.gethostname()
+
+    def test_primary_address_is_not_wildcard(self):
+        from readwebform.server import _primary_address
+        address = _primary_address()
+        assert address is None or address not in ('0.0.0.0', '::')

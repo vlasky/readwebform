@@ -5,6 +5,7 @@ Core orchestration for readwebform: load, validate, serve, output.
 import sys
 import traceback
 
+from .browser import gui_available
 from .forms import FieldSpec, generate_form_html
 from .multipart import parse_size_limit
 from .output import format_env_output, format_json_output, write_env_file
@@ -83,10 +84,18 @@ def run_readwebform(args) -> int:
                   file=sys.stderr)
             print('         Consider --host 127.0.0.1 for local-only access.', file=sys.stderr)
 
-        # args.launch_browser: None = not requested, '' = system default, path = custom browser
+        # Browser: --no-launch-browser wins; --launch-browser [path] forces it;
+        # otherwise open the system browser when a desktop is available.
+        if getattr(args, 'no_launch_browser', False):
+            browser_path = None
+        elif args.launch_browser is not None:
+            browser_path = args.launch_browser
+        else:
+            browser_path = '' if gui_available() else None
+
         try:
             success, form_data, file_metadata, cancelled = server.serve(
-                launch_browser_path=args.launch_browser,
+                launch_browser_path=browser_path,
                 url_file=getattr(args, 'url_file', None)
             )
         except KeyboardInterrupt:
@@ -160,7 +169,8 @@ def load_html(args) -> str:
             args.field,
             args.no_submit_button,
             getattr(args, 'no_cancel_button', False),
-            getattr(args, 'cancel_label', 'Cancel')
+            getattr(args, 'cancel_label', 'Cancel'),
+            getattr(args, 'submit_label', 'Submit'),
         )
 
     return read_stdin()
@@ -168,7 +178,8 @@ def load_html(args) -> str:
 
 def generate_html_from_fields(field_specs: list, no_submit_button: bool,
                               no_cancel_button: bool = False,
-                              cancel_label: str = 'Cancel') -> str:
+                              cancel_label: str = 'Cancel',
+                              submit_label: str = 'Submit') -> str:
     """
     Generate form HTML from declarative field specification strings.
 
@@ -183,7 +194,8 @@ def generate_html_from_fields(field_specs: list, no_submit_button: bool,
             raise InputError(str(e), EXIT_INVALID_HTML) from e
 
     return generate_form_html(fields, add_submit_button=not no_submit_button,
-                              add_cancel_button=not no_cancel_button, cancel_label=cancel_label)
+                              add_cancel_button=not no_cancel_button, cancel_label=cancel_label,
+                              submit_label=submit_label)
 
 
 def read_stdin() -> str:

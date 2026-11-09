@@ -42,19 +42,20 @@ GIF_FPS = 10
 # actually run, minus the python -m prefix).
 DEMO_ARGS = [
     '--title', 'Release checklist',
-    '--field', 'version:text:Version:required,placeholder=1.4.2',
+    '--submit-label', 'Ship it',
+    '--field', 'version:text:Version:required,placeholder=e.g. 2.1.0',
     '--field', 'env:select:Environment:options=staging|production',
-    '--field', 'channels:checkbox:Notify+the+team:checked',
+    '--field', 'notify:checkbox:Notify the team:checked',
     '--field', 'mode:radio:Rollout:options=canary|full,value=canary',
 ]
 
 # Terminal typing: how the command is rendered (line breaks for readability)
 COMMAND_LINES = [
-    'readwebform --title "Release checklist" \\',
-    '  --field version:text:Version:required,placeholder=1.4.2 \\',
-    '  --field env:select:Environment:options=staging|production \\',
-    '  --field channels:checkbox:Notify+the+team:checked \\',
-    '  --field mode:radio:Rollout:options=canary|full,value=canary',
+    'readwebform --title "Release checklist" --submit-label "Ship it" \\',
+    '  --field "version:text:Version:required,placeholder=e.g. 2.1.0" \\',
+    '  --field "env:select:Environment:options=staging|production" \\',
+    '  --field "notify:checkbox:Notify the team:checked" \\',
+    '  --field "mode:radio:Rollout:options=canary|full,value=canary"',
 ]
 
 PAGE_HTML = r"""<!DOCTYPE html>
@@ -143,7 +144,9 @@ def main() -> int:
     workdir = Path(tempfile.mkdtemp(prefix='readwebform_demo_'))
     url_file = workdir / 'url.txt'
 
-    env = dict(os.environ, PYTHONPATH=str(SRC), PYTHONUNBUFFERED='1')
+    # CI=1 stops the real process from opening a real browser; the browser
+    # pane in the recording plays that role.
+    env = dict(os.environ, PYTHONPATH=str(SRC), PYTHONUNBUFFERED='1', CI='1')
     proc = subprocess.Popen(
         [sys.executable, '-m', 'readwebform', *DEMO_ARGS, '--timeout', '120',
          '--url-file', str(url_file), '--upload-dir', str(workdir / 'uploads')],
@@ -188,7 +191,7 @@ def main() -> int:
 
             # 4. Fill it in like a person would
             frame.locator('input[name=version]').click()
-            frame.locator('input[name=version]').press_sequentially('1.4.2', delay=110)
+            frame.locator('input[name=version]').press_sequentially('2.1.0', delay=110)
             page.wait_for_timeout(400)
             frame.locator('select[name=env]').select_option('production')
             page.wait_for_timeout(500)

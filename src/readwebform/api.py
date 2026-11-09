@@ -265,6 +265,7 @@ def read_webform_fields(
     browser_path: Optional[str] = None,
     add_cancel_button: bool = True,
     cancel_label: str = 'Cancel',
+    submit_label: str = 'Submit',
     **kwargs
 ) -> FormResult:
     """
@@ -282,6 +283,7 @@ def read_webform_fields(
         browser_path: Path to specific browser (optional)
         add_cancel_button: Whether to add cancel button (default: True)
         cancel_label: Label for the cancel button (default: 'Cancel')
+        submit_label: Label for the submit button (default: 'Submit')
         **kwargs: Additional arguments passed to read_webform()
 
     Returns:
@@ -314,7 +316,8 @@ def read_webform_fields(
         text=text,
         add_submit=True,
         add_cancel=add_cancel_button,
-        cancel_label=cancel_label
+        cancel_label=cancel_label,
+        submit_label=submit_label
     )
 
     # Use read_webform

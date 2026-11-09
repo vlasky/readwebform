@@ -107,7 +107,8 @@ class FieldSpec:
 
 
 def generate_form_html(fields: list[FieldSpec], add_submit_button: bool = True,
-                       add_cancel_button: bool = True, cancel_label: str = 'Cancel') -> str:
+                       add_cancel_button: bool = True, cancel_label: str = 'Cancel',
+                       submit_label: str = 'Submit') -> str:
     """
     Generate an HTML form from field specifications.
 
@@ -116,6 +117,7 @@ def generate_form_html(fields: list[FieldSpec], add_submit_button: bool = True,
         add_submit_button: Whether to add a submit button
         add_cancel_button: Whether to add a cancel button
         cancel_label: Label text for the cancel button
+        submit_label: Label text for the submit button
 
     Returns:
         HTML form string
@@ -129,7 +131,7 @@ def generate_form_html(fields: list[FieldSpec], add_submit_button: bool = True,
         form_parts.append(generate_field_html(field))
 
     if add_submit_button:
-        form_parts.append('    <button type="submit">Submit</button>')
+        form_parts.append(f'    <button type="submit">{escape_html(submit_label)}</button>')
 
     if add_cancel_button:
         form_parts.append('    <button type="submit" name="_cancel" value="1" class="cancel" '
@@ -379,7 +381,8 @@ def generate_form_html_from_dicts(
     text: Optional[str] = None,
     add_submit: bool = True,
     add_cancel: bool = True,
-    cancel_label: str = 'Cancel'
+    cancel_label: str = 'Cancel',
+    submit_label: str = 'Submit'
 ) -> str:
     """
     Generate a complete HTML document from field dictionaries.
@@ -393,11 +396,13 @@ def generate_form_html_from_dicts(
         add_submit: Whether to add a submit button
         add_cancel: Whether to add a cancel button
         cancel_label: Label text for the cancel button
+        submit_label: Label text for the submit button
 
     Returns:
         Complete HTML document string
     """
     field_specs = [dict_to_fieldspec(f) for f in fields]
     form_html = generate_form_html(field_specs, add_submit_button=add_submit,
-                                   add_cancel_button=add_cancel, cancel_label=cancel_label)
+                                   add_cancel_button=add_cancel, cancel_label=cancel_label,
+                                   submit_label=submit_label)
     return render_page(form_html, title=title, text=text)

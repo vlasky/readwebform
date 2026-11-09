@@ -229,13 +229,17 @@ Controlled by `--reset-timeout-on-error` (default `true`):
       http://127.0.0.1:49162/readform_7a1f3c
 ```
     
--   By default, it does **not** open a browser automatically.
-    
--   If `--launch-browser` is provided:
+-   When bound to all interfaces (`--host 0.0.0.0` or `::`), the URL shown uses the machine's primary network address (found by asking the kernel which local address routes to the default gateway), falling back to the hostname, so it can be shared.
+
+-   By default the **system default browser is opened automatically when a desktop is available**. "No desktop" means any of: `CI` set, `SSH_CONNECTION` or `SSH_TTY` set, `READWEBFORM_NO_BROWSER` set, or (on Unix other than macOS) neither `DISPLAY` nor `WAYLAND_DISPLAY` set. In that case only the URL is printed.
+
+-   `--no-launch-browser` never opens a browser. `--launch-browser` always opens one:
     
     -   With no argument → opens using the **system default browser**.
         
     -   With a path → executes that program to open the URL.
+
+-   Browsers are started from a child process whose standard streams point at the null device, so nothing they print can reach readwebform's stdout.
         
 -   If the browser fails to launch, a warning is printed to stderr and the program continues normally.
     

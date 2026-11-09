@@ -39,9 +39,9 @@ try:
     try:
         __version__ = _pkg_version("readwebform")
     except PackageNotFoundError:
-        __version__ = "0.3.0"
+        __version__ = "0.4.0"
 except ImportError:  # pragma: no cover
-    __version__ = "0.3.0"
+    __version__ = "0.4.0"
 __author__ = "Vlad Lasky"
 __email__ = "github@vladlasky.com"
 

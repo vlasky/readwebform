@@ -6,6 +6,7 @@ import argparse
 import math
 import sys
 
+from . import __version__
 from .multipart import parse_size_limit
 from .output import DEFAULT_ENV_PREFIX, is_valid_var_name
 
@@ -33,6 +34,7 @@ class ReadWebFormArgumentParser:
 
     def _setup_arguments(self):
         """Configure all command-line arguments."""
+        self.parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
 
         input_group = self.parser.add_argument_group('input sources (mutually exclusive)')
         input_group.add_argument(
@@ -157,7 +159,14 @@ class ReadWebFormArgumentParser:
             nargs='?',
             const='',
             metavar='<path>',
-            help='Launch a web browser (system default if no path is given)'
+            help='Open the form in a browser even when no desktop is detected, optionally '
+                 'with a specific browser executable. By default the browser opens '
+                 'automatically when a desktop is available (not in CI or over SSH).'
+        )
+        browser_group.add_argument(
+            '--no-launch-browser',
+            action='store_true',
+            help='Never open a browser; just print the URL'
         )
 
         form_group = self.parser.add_argument_group('form generation')
@@ -165,6 +174,12 @@ class ReadWebFormArgumentParser:
             '--no-submit-button',
             action='store_true',
             help='Omit the automatic submit button in declarative mode'
+        )
+        form_group.add_argument(
+            '--submit-label',
+            metavar='<text>',
+            default='Submit',
+            help='Label for the submit button (default: Submit)'
         )
         form_group.add_argument(
             '--no-cancel-button',
@@ -210,6 +225,9 @@ class ReadWebFormArgumentParser:
 
         if args.port is not None and (args.port < 1 or args.port > 65535):
             self.parser.error('--port must be between 1 and 65535')
+
+        if args.launch_browser is not None and args.no_launch_browser:
+            self.parser.error('--launch-browser and --no-launch-browser are mutually exclusive')
 
         if args.cert and not args.key:
             self.parser.error('--cert requires --key')

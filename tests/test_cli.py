@@ -187,3 +187,33 @@ class TestCLIValidation:
         parser = ReadWebFormArgumentParser()
         with pytest.raises(SystemExit):
             parser.parse_args(['--env-prefix', '1BAD-'])
+
+
+class TestNewOptions:
+    def test_version_flag(self, capsys):
+        from readwebform import __version__
+        parser = ReadWebFormArgumentParser()
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(['--version'])
+        assert exc.value.code == 0
+        assert capsys.readouterr().out.strip() == f'readwebform {__version__}'
+
+    def test_launch_browser_defaults_to_auto(self):
+        parser = ReadWebFormArgumentParser()
+        args = parser.parse_args([])
+        assert args.launch_browser is None
+        assert args.no_launch_browser is False
+
+    def test_no_launch_browser(self):
+        parser = ReadWebFormArgumentParser()
+        assert parser.parse_args(['--no-launch-browser']).no_launch_browser is True
+
+    def test_launch_flags_are_exclusive(self):
+        parser = ReadWebFormArgumentParser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(['--launch-browser', '--no-launch-browser'])
+
+    def test_submit_label(self):
+        parser = ReadWebFormArgumentParser()
+        assert parser.parse_args([]).submit_label == 'Submit'
+        assert parser.parse_args(['--submit-label', 'Ship it']).submit_label == 'Ship it'
