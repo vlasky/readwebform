@@ -4,6 +4,7 @@ Core orchestration for readwebform: load, validate, serve, output.
 
 import sys
 import traceback
+from typing import Optional
 
 from .browser import gui_available
 from .forms import FieldSpec, generate_form_html
@@ -84,14 +85,7 @@ def run_readwebform(args) -> int:
                   file=sys.stderr)
             print('         Consider --host 127.0.0.1 for local-only access.', file=sys.stderr)
 
-        # Browser: --no-launch-browser wins; --launch-browser [path] forces it;
-        # otherwise open the system browser when a desktop is available.
-        if getattr(args, 'no_launch_browser', False):
-            browser_path = None
-        elif args.launch_browser is not None:
-            browser_path = args.launch_browser
-        else:
-            browser_path = '' if gui_available() else None
+        browser_path = resolve_browser_launch(args)
 
         try:
             success, form_data, file_metadata, cancelled = server.serve(
@@ -131,6 +125,39 @@ def run_readwebform(args) -> int:
         print(f'Internal error: {e}', file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return EXIT_INTERNAL_ERROR
+
+
+LOOPBACK_HOSTS = ('127.0.0.1', '::1', 'localhost')
+
+
+def is_loopback_host(host: str) -> bool:
+    return host in LOOPBACK_HOSTS or host.startswith('127.')
+
+
+def resolve_browser_launch(args) -> Optional[str]:
+    """
+    Decide whether, and with which browser, to open the form.
+
+    Returns None (do not launch), '' (system default browser) or a browser
+    executable path, following these rules in order:
+
+    1. ``--no-launch-browser``: never.
+    2. ``--launch-browser [path]``: always, with that browser.
+    3. Otherwise launch the default browser only when a desktop is detected
+       (see ``browser.gui_available``) AND the form is for this machine's
+       user: the host is a loopback address (a non-loopback host means the
+       URL is for someone else) and no ``--url-file`` was requested (which
+       means the caller is handling the URL itself).
+    """
+    if getattr(args, 'no_launch_browser', False):
+        return None
+    if args.launch_browser is not None:
+        return args.launch_browser
+    if not is_loopback_host(args.host):
+        return None
+    if getattr(args, 'url_file', None):
+        return None
+    return '' if gui_available() else None
 
 
 def _emit_failure(args, error: str) -> None:

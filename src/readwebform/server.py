@@ -638,7 +638,10 @@ class FormServer:
             self._start_timer()
 
             if launch_browser_path is not None:
-                launch_browser(self._url, launch_browser_path or None)
+                print('Opening the form in your browser (use --no-launch-browser to suppress)',
+                      file=sys.stderr)
+                if not launch_browser(self._url, launch_browser_path or None):
+                    print('Could not open a browser; open the URL above manually.', file=sys.stderr)
 
             # Poll rather than wait() so Ctrl+C is honoured on every platform
             while not self.shutdown_event.wait(0.5):

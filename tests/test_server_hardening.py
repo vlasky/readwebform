@@ -469,3 +469,19 @@ class TestDisplayURL:
         from readwebform.server import _primary_address
         address = _primary_address()
         assert address is None or address not in ('0.0.0.0', '::')
+
+
+class TestLaunchFeedback:
+    def test_failed_launch_is_reported_on_stderr(self, capsys):
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.3)
+        server.serve(launch_browser_path=os.path.join(os.sep, 'nonexistent', 'browser-xyz'))
+        err = capsys.readouterr().err
+        assert 'Opening the form in your browser' in err
+        assert 'Could not open a browser' in err
+
+    def test_no_launch_prints_nothing_about_browsers(self, capsys):
+        server = make_server('<form><input name="a"><button>Go</button></form>', timeout=0.3)
+        server.serve()
+        err = capsys.readouterr().err
+        assert 'Opening the form' not in err
+        assert 'Open this URL' in err

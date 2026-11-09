@@ -217,3 +217,46 @@ class TestNewOptions:
         parser = ReadWebFormArgumentParser()
         assert parser.parse_args([]).submit_label == 'Submit'
         assert parser.parse_args(['--submit-label', 'Ship it']).submit_label == 'Ship it'
+
+
+class TestBrowserLaunchDecision:
+    """resolve_browser_launch(): None = no launch, '' = default browser, str = custom."""
+
+    def _args(self, *argv):
+        return ReadWebFormArgumentParser().parse_args(list(argv))
+
+    def test_default_on_desktop_launches(self, monkeypatch):
+        from readwebform import core
+        monkeypatch.setattr(core, 'gui_available', lambda: True)
+        assert core.resolve_browser_launch(self._args()) == ''
+
+    def test_default_without_desktop_does_not(self, monkeypatch):
+        from readwebform import core
+        monkeypatch.setattr(core, 'gui_available', lambda: False)
+        assert core.resolve_browser_launch(self._args()) is None
+
+    def test_non_loopback_host_suppresses_auto_launch(self, monkeypatch):
+        from readwebform import core
+        monkeypatch.setattr(core, 'gui_available', lambda: True)
+        for host in ('0.0.0.0', '::', '192.168.1.5', 'myhost.local'):
+            assert core.resolve_browser_launch(self._args('--host', host)) is None
+        for host in ('127.0.0.1', '127.0.0.2', '::1', 'localhost'):
+            assert core.resolve_browser_launch(self._args('--host', host)) == ''
+
+    def test_url_file_suppresses_auto_launch(self, monkeypatch, tmp_path):
+        from readwebform import core
+        monkeypatch.setattr(core, 'gui_available', lambda: True)
+        assert core.resolve_browser_launch(self._args('--url-file', str(tmp_path / 'u'))) is None
+
+    def test_explicit_launch_overrides_gates(self, monkeypatch, tmp_path):
+        from readwebform import core
+        monkeypatch.setattr(core, 'gui_available', lambda: False)
+        args = self._args('--host', '0.0.0.0', '--url-file', str(tmp_path / 'u'), '--launch-browser')
+        assert core.resolve_browser_launch(args) == ''
+        args = self._args('--launch-browser', '/usr/bin/firefox')
+        assert core.resolve_browser_launch(args) == '/usr/bin/firefox'
+
+    def test_no_launch_wins_over_everything(self, monkeypatch):
+        from readwebform import core
+        monkeypatch.setattr(core, 'gui_available', lambda: True)
+        assert core.resolve_browser_launch(self._args('--no-launch-browser')) is None

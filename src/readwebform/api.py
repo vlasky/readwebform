@@ -172,7 +172,8 @@ def read_webform(
     Args:
         html: HTML form content (fragment or complete document)
         timeout: Maximum seconds to wait for submission (default: 300)
-        launch_browser: Whether to automatically open browser (default: False)
+        launch_browser: Whether to open the browser (default: False). Unlike the
+            CLI, the API never opens a browser unless this is True.
         browser_path: Path to specific browser executable (None = system default)
         max_file_size: Maximum individual file upload size in bytes
         max_total_size: Maximum total upload size in bytes
