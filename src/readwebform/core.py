@@ -111,7 +111,12 @@ def run_readwebform(args) -> int:
 
         env_prefix = getattr(args, 'env_prefix', 'WEBFORM_')
         if args.envfile:
-            write_env_file(args.envfile, form_data.fields, env_prefix, file_metadata)
+            try:
+                write_env_file(args.envfile, form_data.fields, env_prefix, file_metadata)
+            except OSError as e:
+                print(f'Error: Cannot write env file {args.envfile}: {e.strerror or e}',
+                      file=sys.stderr)
+                return EXIT_INVALID_ARGUMENT
         if args.print_env:
             print(format_env_output(form_data.fields, env_prefix, file_metadata))
         else:
