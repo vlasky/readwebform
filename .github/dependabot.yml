@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # The actions used by CI and by the PyPI publish workflow are pinned to
+  # commit SHAs; Dependabot proposes the bumps.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # readwebform has no runtime dependencies. This covers the test/dev
+  # extras declared in pyproject.toml.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
