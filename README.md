@@ -1,6 +1,6 @@
 # readwebform
 
-![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)
+[![PyPI](https://img.shields.io/pypi/v/readwebform.svg)](https://pypi.org/project/readwebform/)
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
