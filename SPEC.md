@@ -85,21 +85,27 @@ readwebform [options]
 | `--title <string>` | Page title shown above the form. |
 | `--text <string>` | Instructional text shown above the form. |
 | `--host <ip>` | Host/IP to bind to (default: `127.0.0.1`). |
+| `--url-host <host>` | Host name or address to put in the printed URL (default: the bind address, or a best-effort guess for a wildcard bind). |
 | `--port <int>` | TCP port (optional; defaults to dynamic free port). |
 | `--max-file-size <limit>` | Maximum individual upload size (e.g., `5M`, `200K`). |
 | `--max-total-size <limit>` | Maximum total upload size (e.g., `20M`, `1G`). |
+| `--upload-dir <path>` | Directory to save uploaded files in (default: a new temporary directory). |
 | `--timeout <seconds>` | Max time to wait for submission (default: `300`). |
-| \`--reset-timeout-on-error \[true | false\]\` |
+| `--reset-timeout-on-error [true\|false]` | Restart the timeout after a recoverable submission error (default: `true`). |
 | `--json` | Output result as JSON (default output format). |
 | `--envfile <path>` | Write sanitized `export` statements to file. |
 | `--print-env` | Print sanitized environment variable exports to stdout. |
-| `--launch-browser [path]` | Launch a web browser to open the form. If no path is provided, uses the system default browser. |
+| `--env-prefix <prefix>` | Prefix for environment variable names (default: `WEBFORM_`). |
+| `--launch-browser [path]` | Always open a browser on the form, even where it would not open by default. If no path is provided, uses the system default browser. |
+| `--no-launch-browser` | Never open a browser; just print the URL. |
 | `--no-submit-button` | Disable automatic submit button in declarative mode. |
+| `--submit-label <text>` | Label for the submit button (default: "Submit"). |
 | `--no-cancel-button` | Disable cancel button in declarative mode. |
 | `--cancel-label <text>` | Label for the cancel button (default: "Cancel"). |
 | `--url-file <path>` | Write the form URL to this file. |
 | `--cert <path>` | SSL certificate file (PEM) for HTTPS. |
 | `--key <path>` | SSL private key file (PEM) for HTTPS. |
+| `--version` | Print the version and exit. |
 
 * * *
 

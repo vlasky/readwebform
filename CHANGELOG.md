@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `readwebform.__version__` is `0+unknown` when the package is run from a source tree that was never installed, instead of a hardcoded number that could be wrong
+- README status updated from "proof of concept" to beta; SPEC.md option table now lists `--url-host`, `--upload-dir`, `--env-prefix`, `--no-launch-browser`, `--submit-label` and `--version`
+
+### Added
+
+- Real-browser tests (`tests/test_real_browser.py`, Chromium via Playwright, new `e2e` extra) and a CI job that runs them
+- The publish workflow creates a GitHub Release with the changelog entry and the built distributions after uploading to PyPI
+
+### Fixed
+
+- Tests that failed on a busy machine: the Ctrl+C test sent the signal after a fixed sleep rather than when the server was up, and the launcher exit-status test depended on a script finishing within one second. The timeout tests no longer assert narrow wall-clock windows and run in about a third of the time
+
 ## [0.4.0] - 2026-11-09
 
 ### Changed

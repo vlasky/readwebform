@@ -636,6 +636,10 @@ python -m pytest tests/ -v --ignore=tests/test_integration.py
 
 # Run only integration tests
 python -m pytest tests/test_integration.py -v
+
+# Real-browser tests (skipped unless Playwright and Chromium are installed)
+pip install -e ".[e2e]" && playwright install chromium
+python -m pytest tests/test_real_browser.py -v
 ```
 
 ### Demo GIF
@@ -648,16 +652,17 @@ See [SPEC.md](SPEC.md) for the full design specification. This document covers a
 
 ### Test Coverage
 
-- **307 tests** across 12 files
+- **More than 330 tests** across 13 files
   - Unit tests for the multipart parser, HTML rewriting, declarative forms, output formatting, CLI parsing and the Python API
   - Integration tests that run a real server on a random port: submissions, uploads, CSRF, size limits, timeouts, the CLI as a subprocess (exit codes 2, 5 and 130)
   - Hardening regressions: byte-exact uploads, UTF-8 filenames, repeated file fields, negative Content-Length, HTTP 410 on a second submission, listener release, concurrent servers, IPv6, idle HTTP and TLS connections
   - Threading, timeout, HTTPS (ephemeral certificates via `cryptography`, test dependency only) and browser-launch isolation tests
-- CI runs the suite on Python 3.9 to 3.14 on Linux, plus macOS and Windows, and runs `ruff` and `pyright`
+  - Real-browser tests: Chromium, driven by Playwright, fills in and submits generated forms (multiple files, UTF-8 filenames, an unselected file input, required-field validation, cancel)
+- CI runs the suite on Python 3.9 to 3.14 on Linux, plus macOS and Windows, runs the real-browser tests on Linux, and runs `ruff` and `pyright`
 
 ## Status
 
-This is an **initial proof of concept**. The API and CLI interface may change based on user feedback. If you have suggestions or run into issues, please open an issue on GitHub.
+readwebform is in **beta**. It is tested on Linux, macOS and Windows across Python 3.9 to 3.14 and published on PyPI, but until 1.0 the CLI and Python API may still change between minor versions; changes are listed in [CHANGELOG.md](CHANGELOG.md). If you have suggestions or run into issues, please open an issue on GitHub.
 
 ## License
 
