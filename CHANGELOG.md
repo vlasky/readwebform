@@ -14,6 +14,16 @@
 
 ### Fixed
 
+Found by running the CLI and server with hostile inputs:
+
+- **A submission is no longer thrown away when `--envfile` cannot be written.** The envfile, `--url-file`, `--upload-dir`, `--cert` and `--key` paths are checked before the form is shown (exit code 3), and if the envfile write still fails afterwards the result is printed to stdout before exiting with code 3. Previously the user filled in the form and got a traceback and no output
+- Start-up failures (port in use, privileged port, unresolvable or unassignable `--host`, invalid certificate, unwritable `--url-file`, non-UTF-8 HTML on stdin) print a one-line error instead of a traceback
+- An empty `--host` is rejected; it used to bind every interface without the usual warning. Empty values for `--url-host`, `--envfile`, `--url-file`, `--upload-dir`, `--htmlfile`, `--cert`, `--key` and the size limits are rejected too (exit code 8) instead of being silently ignored
+- `--field` and the Python API reject the reserved names `_cancel` and `_csrf_token`; a field called `_cancel` made every submission a cancellation
+- `--url-host` must look like a host: whitespace, newlines and URL punctuation are rejected, and `[::1]` no longer produces `[[::1]]`
+- When the timeout fired while an upload was still being saved, the files already written were left in the upload directory and never reported. The server now waits for a submission that is being handled before it returns
+- Saving many files with the same name took quadratic time (4,000 files: 20 s, now 0.5 s)
+- `Content-Length` must be ASCII digits; `+10`, `1_0` and non-ASCII digits are rejected with HTTP 400
 - Tests that failed on a busy machine: the Ctrl+C test sent the signal after a fixed sleep rather than when the server was up, and the launcher exit-status test depended on a script finishing within one second. The timeout tests no longer assert narrow wall-clock windows and run in about a third of the time
 
 ## [0.4.0] - 2026-11-09

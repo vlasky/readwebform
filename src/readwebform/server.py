@@ -24,6 +24,7 @@ loop. For HTTPS the TLS handshake is performed on the connection thread for
 the same reason.
 """
 
+import contextlib
 import html
 import http.server
 import os
@@ -122,6 +123,16 @@ class _FormHTTPServer(http.server.ThreadingHTTPServer):
               file=sys.stderr)
 
 
+# How long serve() waits for a submission that is still being handled
+_PROCESSING_GRACE = 10.0
+
+
+def _report_start_error(message: str, error: BaseException) -> None:
+    """Print a start-up failure and mark the exception as already reported."""
+    print(f'Error: {message}', file=sys.stderr)
+    error.readwebform_reported = True  # type: ignore[attr-defined]
+
+
 class FormServerHandler(http.server.BaseHTTPRequestHandler):
     """HTTP request handler for form serving and submission."""
 
@@ -204,13 +215,12 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         if length_header is None:
             self._send_error_page(411, 'Length Required', 'Content-Length header is required')
             return
-        try:
-            content_length = int(length_header)
-            if content_length < 0:
-                raise ValueError('negative')
-        except ValueError:
+        # Digits only: int() would also take '+10', '1_0' and non-ASCII digits
+        length_text = length_header.strip()
+        if not (length_text.isascii() and length_text.isdigit()):
             self._send_error_page(400, 'Bad Request', 'Invalid Content-Length header')
             return
+        content_length = int(length_text)
 
         effective_max = session.max_total_size
         if effective_max is None:
@@ -233,6 +243,13 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
             self._send_error_page(400, 'Bad Request', 'Request body shorter than Content-Length')
             return
 
+        # From here the request is complete. serve() waits for this block
+        # before it returns, so files are never left half-saved or
+        # half-removed when the session ends while we are working.
+        with session.processing():
+            self._process_submission(session, content_type, body)
+
+    def _process_submission(self, session: 'FormServer', content_type: str, body: bytes) -> None:
         try:
             if 'multipart/form-data' in content_type:
                 form_data = parse_multipart(body, content_type,
@@ -269,9 +286,10 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
 
         file_metadata: dict = {}
         saved_paths = []
+        next_suffix: dict[str, int] = {}
         try:
             for name, uploaded_file in form_data.iter_files():
-                filepath = save_uploaded_file(uploaded_file, session.get_upload_dir())
+                filepath = save_uploaded_file(uploaded_file, session.get_upload_dir(), next_suffix)
                 saved_paths.append(filepath)
                 meta = {
                     'filename': uploaded_file.filename,
@@ -463,6 +481,10 @@ class FormServer:
         self.server: Optional[_FormHTTPServer] = None
         self._url = ''
 
+        # Submissions whose body has arrived and which are being handled
+        self._processing = 0
+        self._idle = threading.Condition()
+
     # -- outcome ---------------------------------------------------------
 
     @property
@@ -506,6 +528,22 @@ class FormServer:
             self.timeout_timer.cancel()
             self.timeout_timer = None
         return True
+
+    @contextlib.contextmanager
+    def processing(self):
+        """Mark a fully received submission as being handled (see serve())."""
+        with self._idle:
+            self._processing += 1
+        try:
+            yield
+        finally:
+            with self._idle:
+                self._processing -= 1
+                self._idle.notify_all()
+
+    def _wait_until_idle(self, timeout: float) -> None:
+        with self._idle:
+            self._idle.wait_for(lambda: self._processing == 0, timeout=timeout)
 
     def release(self) -> None:
         """Let serve() return. Called after the final response has been written."""
@@ -574,10 +612,10 @@ class FormServer:
         try:
             context.load_cert_chain(certfile=self.cert_file, keyfile=self.key_file)
         except ssl.SSLError as e:
-            print(f'Error: SSL configuration failed: {e}', file=sys.stderr)
+            _report_start_error(f'SSL configuration failed: {e}', e)
             raise
-        except FileNotFoundError as e:
-            print(f'Error: SSL certificate or key file not found: {e}', file=sys.stderr)
+        except OSError as e:
+            _report_start_error(f'Cannot read the SSL certificate or key: {e}', e)
             raise
         return context
 
@@ -587,7 +625,7 @@ class FormServer:
     def _display_host(self) -> str:
         """The host to put in the URL: an explicit url_host, the bind host, or a best-effort guess."""
         if self.url_host:
-            return self.url_host
+            return self.url_host.strip('[]')  # _build_url adds the brackets
         if not self.is_wildcard_host():
             return self.host
         address = _primary_address(ipv6=(self.host == '::'))
@@ -623,7 +661,7 @@ class FormServer:
         try:
             self.server = _FormHTTPServer((self.host, self.port), self, ssl_context)
         except OSError as e:
-            print(f'Error: Failed to bind to {self.host}:{self.port}: {e}', file=sys.stderr)
+            _report_start_error(f'Failed to bind to {self.host}:{self.port}: {e}', e)
             raise
 
         self._url = self._build_url(self.server.server_address[1])
@@ -639,8 +677,12 @@ class FormServer:
             print(file=sys.stderr)
 
             if url_file:
-                with open(url_file, 'w', encoding='utf-8') as f:
-                    f.write(self._url + '\n')
+                try:
+                    with open(url_file, 'w', encoding='utf-8') as f:
+                        f.write(self._url + '\n')
+                except OSError as e:
+                    _report_start_error(f'Cannot write the URL file {url_file}: {e}', e)
+                    raise
 
             # Serve before launching the browser: some launchers block until
             # the page has loaded.
@@ -665,6 +707,11 @@ class FormServer:
                 if self._outcome is None:
                     self._outcome = OUTCOME_STOPPED
             self.shutdown_event.set()
+            # A handler that lost the race (for example to the timeout) may
+            # still be saving or removing uploaded files. Let it finish:
+            # handler threads are daemons and would be killed mid-way when
+            # the process exits, leaving files nobody is told about.
+            self._wait_until_idle(_PROCESSING_GRACE)
             if started:
                 self.server.shutdown()
             self.server.server_close()

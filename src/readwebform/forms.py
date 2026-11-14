@@ -9,6 +9,10 @@ from typing import Optional
 from .parser import render_page
 
 # Field types accepted by --field and the Python API
+# Names readwebform uses itself: the CSRF token and the cancel button. A user
+# field with one of these names would break every submission.
+RESERVED_NAMES = frozenset({'_csrf_token', '_cancel'})
+
 VALID_TYPES = frozenset({
     'text', 'email', 'password', 'number', 'date', 'url', 'tel', 'search',
     'time', 'datetime-local', 'month', 'week', 'range', 'color', 'hidden',
@@ -62,6 +66,8 @@ class FieldSpec:
 
         if not name:
             raise ValueError(f'Invalid field spec: {spec} (field name is empty)')
+        if name in RESERVED_NAMES:
+            raise ValueError(f'Invalid field spec: {spec} (the name {name} is reserved)')
 
         if field_type not in VALID_TYPES:
             raise ValueError(
@@ -342,6 +348,8 @@ def dict_to_fieldspec(field_dict: dict) -> FieldSpec:
     field_type = str(field_dict.get('type', '')).lower()
     if not name:
         raise ValueError('Field is missing a name')
+    if name in RESERVED_NAMES:
+        raise ValueError(f'The field name {name} is reserved')
     if field_type not in VALID_TYPES:
         raise ValueError(f'Invalid field type: {field_type!r} for field {name!r} '
                          f'(must be one of {", ".join(sorted(VALID_TYPES))})')

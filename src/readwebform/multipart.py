@@ -347,20 +347,25 @@ def extract_value_from_header(header: str, param: str) -> Optional[str]:
     return parse_header_params(header).get(param.lower())
 
 
-def save_uploaded_file(uploaded_file: UploadedFile, directory: str) -> str:
+def save_uploaded_file(uploaded_file: UploadedFile, directory: str,
+                       next_suffix: Optional[dict[str, int]] = None) -> str:
     """
     Save an uploaded file to a directory, avoiding name collisions.
 
     Args:
         uploaded_file: UploadedFile instance
         directory: Target directory (must exist)
+        next_suffix: Optional dict shared between the calls for one request.
+            It remembers the next free suffix for each filename, so saving
+            many files with the same name does not retry every earlier
+            suffix each time.
 
     Returns:
         Full path to the saved file
     """
     filename = sanitize_filename(uploaded_file.filename)
     base, ext = os.path.splitext(filename)
-    counter = 0
+    counter = next_suffix.get(filename, 0) if next_suffix is not None else 0
     while True:
         candidate = filename if counter == 0 else f'{base}_{counter}{ext}'
         filepath = os.path.join(directory, candidate)
@@ -370,6 +375,8 @@ def save_uploaded_file(uploaded_file: UploadedFile, directory: str) -> str:
         except FileExistsError:
             counter += 1
             continue
+        if next_suffix is not None:
+            next_suffix[filename] = counter + 1
         with os.fdopen(fd, 'wb') as f:
             f.write(uploaded_file.content)
         return filepath

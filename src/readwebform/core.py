@@ -3,6 +3,7 @@ Core orchestration for readwebform: load, validate, serve, output.
 """
 
 import ipaddress
+import os
 import sys
 import traceback
 from typing import Optional
@@ -67,6 +68,12 @@ def run_readwebform(args) -> int:
             print(f'Error: Invalid size limit: {e}', file=sys.stderr)
             return EXIT_INVALID_ARGUMENT
 
+        try:
+            check_paths(args)
+        except InputError as e:
+            print(f'Error: {e}', file=sys.stderr)
+            return e.exit_code
+
         server = FormServer(
             html='',  # set after CSRF injection
             host=args.host,
@@ -98,6 +105,13 @@ def run_readwebform(args) -> int:
             _emit_failure(args, 'interrupted')
             print('\nInterrupted by user', file=sys.stderr)
             return EXIT_INTERRUPTED
+        except OSError as e:
+            # The server could not start (port in use, bad host, bad
+            # certificate...). That is the user's environment, not a bug, so
+            # no traceback. The server has usually printed the reason.
+            if not getattr(e, 'readwebform_reported', False):
+                print(f'Error: {e}', file=sys.stderr)
+            return EXIT_INTERNAL_ERROR
 
         if cancelled:
             _emit_failure(args, 'cancelled')
@@ -110,12 +124,24 @@ def run_readwebform(args) -> int:
             return EXIT_TIMEOUT
 
         env_prefix = getattr(args, 'env_prefix', 'WEBFORM_')
+        envfile_error = None
         if args.envfile:
-            write_env_file(args.envfile, form_data.fields, env_prefix, file_metadata)
+            try:
+                write_env_file(args.envfile, form_data.fields, env_prefix, file_metadata)
+            except OSError as e:
+                envfile_error = e
+
+        # Always print the result, even when the envfile could not be
+        # written: the user has already filled in the form.
         if args.print_env:
             print(format_env_output(form_data.fields, env_prefix, file_metadata))
         else:
             print(format_json_output(form_data.fields, file_metadata, success=True))
+
+        if envfile_error is not None:
+            print(f'Error: Cannot write the envfile {args.envfile}: {envfile_error}', file=sys.stderr)
+            print('       The submission was still printed to stdout.', file=sys.stderr)
+            return EXIT_READ_ERROR
 
         return EXIT_SUCCESS
 
@@ -167,6 +193,52 @@ def resolve_browser_launch(args) -> Optional[str]:
     if getattr(args, 'url_file', None):
         return None
     return '' if gui_available() else None
+
+
+def _check_writable_file(path: str, what: str) -> None:
+    """Raise InputError unless a file can be created or overwritten at path."""
+    if os.path.isdir(path):
+        raise InputError(f'{what} {path} is a directory', EXIT_READ_ERROR)
+    if os.path.exists(path):
+        if not os.access(path, os.W_OK):
+            raise InputError(f'{what} {path} is not writable', EXIT_READ_ERROR)
+        return
+    parent = os.path.dirname(path) or '.'
+    if not os.path.isdir(parent):
+        raise InputError(f'{what} {path}: the directory {parent} does not exist', EXIT_READ_ERROR)
+    if not os.access(parent, os.W_OK | os.X_OK):
+        raise InputError(f'{what} {path}: the directory {parent} is not writable', EXIT_READ_ERROR)
+
+
+def check_paths(args) -> None:
+    """
+    Check the file arguments before the form is shown.
+
+    Finding out that the envfile cannot be written only after the user has
+    filled in the form would waste their submission, so fail now instead.
+    This is a courtesy check, not a guarantee: the write can still fail later.
+
+    Raises:
+        InputError: with exit code 3 if a path is unusable
+    """
+    envfile = getattr(args, 'envfile', None)
+    if envfile:
+        _check_writable_file(envfile, 'The envfile')
+    url_file = getattr(args, 'url_file', None)
+    if url_file:
+        _check_writable_file(url_file, 'The URL file')
+    upload_dir = getattr(args, 'upload_dir', None)
+    if upload_dir and os.path.exists(upload_dir):
+        if not os.path.isdir(upload_dir):
+            raise InputError(f'The upload directory {upload_dir} is not a directory', EXIT_READ_ERROR)
+        if not os.access(upload_dir, os.W_OK | os.X_OK):
+            raise InputError(f'The upload directory {upload_dir} is not writable', EXIT_READ_ERROR)
+    for option, what in (('cert', 'The certificate'), ('key', 'The key')):
+        path = getattr(args, option, None)
+        if path and not os.path.isfile(path):
+            raise InputError(f'{what} file {path} does not exist', EXIT_READ_ERROR)
+        if path and not os.access(path, os.R_OK):
+            raise InputError(f'{what} file {path} is not readable', EXIT_READ_ERROR)
 
 
 def _emit_failure(args, error: str) -> None:
@@ -238,4 +310,9 @@ def read_stdin() -> str:
     """Read HTML from stdin."""
     if sys.stdin.isatty():
         print('Reading HTML from stdin (press Ctrl+D when done)...', file=sys.stderr)
-    return sys.stdin.read()
+    try:
+        # Read bytes and decode as UTF-8 ourselves: the text layer would use
+        # the locale's encoding, and would raise a bare UnicodeDecodeError.
+        return sys.stdin.buffer.read().decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise InputError(f'The HTML on stdin is not valid UTF-8: {e}', EXIT_READ_ERROR) from e

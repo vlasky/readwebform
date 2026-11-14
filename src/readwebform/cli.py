@@ -4,6 +4,7 @@ Command-line interface for readwebform.
 
 import argparse
 import math
+import re
 import sys
 
 from . import __version__
@@ -234,6 +235,18 @@ class ReadWebFormArgumentParser:
 
         if args.launch_browser is not None and args.no_launch_browser:
             self.parser.error('--launch-browser and --no-launch-browser are mutually exclusive')
+
+        # An empty value is almost always an unset shell variable. Several of
+        # these would otherwise be silently ignored, and an empty --host
+        # binds every interface.
+        for option in ('host', 'url_host', 'envfile', 'url_file', 'upload_dir', 'cert', 'key',
+                       'htmlfile', 'max_file_size', 'max_total_size'):
+            value = getattr(args, option, None)
+            if value is not None and not value.strip():
+                self.parser.error(f'--{option.replace("_", "-")} must not be empty')
+
+        if args.url_host is not None and not re.fullmatch(r'[^\s/?#@"<>\\\x00-\x1f]+', args.url_host):
+            self.parser.error('--url-host must be a host name or IP address')
 
         if args.cert and not args.key:
             self.parser.error('--cert requires --key')

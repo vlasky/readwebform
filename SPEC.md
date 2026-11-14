@@ -351,9 +351,9 @@ export WEBFORM_EMAIL='alice@example.com'
 | Code | Meaning |
 | --- | --- |
 | 0 | Successful submission |
-| 1 | Internal error |
+| 1 | Internal error, or the server could not start (port in use, bad host, invalid certificate) |
 | 2 | Invalid HTML or missing form |
-| 3 | Could not read input file |
+| 3 | A file given on the command line could not be read or written |
 | 4 | Reserved (browser launch failures only warn) |
 | 5 | Timeout waiting for submission |
 | 6 | Reserved (oversized uploads are rejected with HTTP 413 and the form stays open) |
