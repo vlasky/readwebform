@@ -34,6 +34,7 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest", "cryptography>=41.0.0"]
 dev = ["pytest", "cryptography>=41.0.0", "ruff", "pyright"]
+e2e = ["pytest", "playwright"]
 
 [project.urls]
 Homepage = "https://github.com/vlasky/readwebform"
