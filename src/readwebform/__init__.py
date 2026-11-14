@@ -33,15 +33,15 @@ Programmatic Usage:
     ])
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 try:
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as _pkg_version
-    try:
-        __version__ = _pkg_version("readwebform")
-    except PackageNotFoundError:
-        __version__ = "0.4.0"
-except ImportError:  # pragma: no cover
-    __version__ = "0.4.0"
+    __version__ = _pkg_version("readwebform")
+except PackageNotFoundError:
+    # Running from a source tree that was never installed. pyproject.toml is
+    # the single place the version is set, so do not guess one here.
+    __version__ = "0+unknown"
 __author__ = "Vlad Lasky"
 __email__ = "github@vladlasky.com"
 
