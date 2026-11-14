@@ -35,7 +35,7 @@ import ssl
 import sys
 import tempfile
 import threading
-from typing import Optional, cast
+from typing import Callable, Optional, cast
 
 from .browser import launch_browser
 from .multipart import (
@@ -123,14 +123,20 @@ class _FormHTTPServer(http.server.ThreadingHTTPServer):
               file=sys.stderr)
 
 
-# How long serve() waits for a submission that is still being handled
-_PROCESSING_GRACE = 10.0
+# How long serve() waits for the state lock while shutting down (see serve())
+_LOCK_GRACE = 2.0
 
 
-def _report_start_error(message: str, error: BaseException) -> None:
-    """Print a start-up failure and mark the exception as already reported."""
+def _report_start_error(message: str, error: BaseException, file_error: bool = False) -> None:
+    """
+    Print a start-up failure and mark the exception as already reported.
+
+    file_error marks a problem with a file named on the command line, which
+    the CLI reports with its file-error exit code rather than the general one.
+    """
     print(f'Error: {message}', file=sys.stderr)
     error.readwebform_reported = True  # type: ignore[attr-defined]
+    error.readwebform_file_error = file_error  # type: ignore[attr-defined]
 
 
 class FormServerHandler(http.server.BaseHTTPRequestHandler):
@@ -220,7 +226,9 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         if not (length_text.isascii() and length_text.isdigit()):
             self._send_error_page(400, 'Bad Request', 'Invalid Content-Length header')
             return
-        content_length = int(length_text)
+        # More than 18 digits is beyond any limit we could accept. Cap the
+        # text first: Python 3.11+ refuses to convert thousands of digits.
+        content_length = int(length_text[:19])
 
         effective_max = session.max_total_size
         if effective_max is None:
@@ -245,11 +253,33 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
 
         # From here the request is complete. serve() waits for this block
         # before it returns, so files are never left half-saved or
-        # half-removed when the session ends while we are working.
+        # half-removed when the session ends while we are working. The
+        # response is written afterwards: a client that reads slowly must
+        # not hold serve() up.
         with session.processing():
-            self._process_submission(session, content_type, body)
+            respond = self._process_submission(session, content_type, body)
+        respond()
 
-    def _process_submission(self, session: 'FormServer', content_type: str, body: bytes) -> None:
+    def _process_submission(self, session: 'FormServer', content_type: str,
+                            body: bytes) -> Callable[[], None]:
+        """Handle a complete request body; return the function that writes the response."""
+
+        def error(code: int, title: str, message: str) -> Callable[[], None]:
+            return lambda: self._send_error_page(code, title, message)
+
+        def gone() -> Callable[[], None]:
+            return error(410, 'Gone', 'This form has already been completed')
+
+        def then_release(send: Callable[[], None]) -> Callable[[], None]:
+            # The outcome is already recorded; release() lets serve() return
+            # once the page has been written (or the client has gone away).
+            def respond() -> None:
+                try:
+                    send()
+                finally:
+                    session.release()
+            return respond
+
         try:
             if 'multipart/form-data' in content_type:
                 form_data = parse_multipart(body, content_type,
@@ -257,32 +287,24 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
             else:
                 form_data = parse_urlencoded(body)
         except SizeLimitExceeded as e:
-            self._send_error_page(413, 'Payload Too Large', str(e))
             session.note_recoverable_error()
             print(f'Upload limit exceeded: {e}', file=sys.stderr)
-            return
+            return error(413, 'Payload Too Large', str(e))
         except (FormParseError, Exception) as e:
-            self._send_error_page(400, 'Bad Request', f'Failed to parse form data: {e}')
             session.note_recoverable_error()
-            return
+            return error(400, 'Bad Request', f'Failed to parse form data: {e}')
 
         submitted_token = form_data.fields.pop('_csrf_token', '')
         if isinstance(submitted_token, list) or not secrets.compare_digest(
                 str(submitted_token).encode('utf-8'), session.csrf_token.encode('utf-8')):
-            self._send_error_page(403, 'Forbidden', 'Invalid CSRF token')
             session.note_recoverable_error()
-            return
+            return error(403, 'Forbidden', 'Invalid CSRF token')
 
         if '_cancel' in form_data.fields:
             form_data.fields.pop('_cancel', None)
             if not session.complete(OUTCOME_CANCELLED):
-                self._send_error_page(410, 'Gone', 'This form has already been completed')
-                return
-            try:
-                self._send_cancelled_page()
-            finally:
-                session.release()
-            return
+                return gone()
+            return then_release(self._send_cancelled_page)
 
         file_metadata: dict = {}
         saved_paths = []
@@ -304,26 +326,20 @@ class FormServerHandler(http.server.BaseHTTPRequestHandler):
         except SessionFinished:
             _unlink_all(saved_paths)
             session._cleanup_upload_dir()
-            self._send_error_page(410, 'Gone', 'This form has already been completed')
-            return
+            return gone()
         except Exception as e:
             _unlink_all(saved_paths)
-            self._send_error_page(500, 'Internal Server Error', f'Failed to save file: {e}')
             session.note_recoverable_error()
-            return
+            return error(500, 'Internal Server Error', f'Failed to save file: {e}')
 
         # Commit the result before responding so a client that disconnects
         # mid-response cannot lose an accepted submission.
         if not session.complete(OUTCOME_SUCCESS, form_data, file_metadata):
             _unlink_all(saved_paths)
             session._cleanup_upload_dir()
-            self._send_error_page(410, 'Gone', 'This form has already been completed')
-            return
+            return gone()
 
-        try:
-            self._send_success_page()
-        finally:
-            session.release()
+        return then_release(self._send_success_page)
 
     def _send_html(self, code: int, page: str):
         body = page.encode('utf-8')
@@ -541,9 +557,17 @@ class FormServer:
                 self._processing -= 1
                 self._idle.notify_all()
 
-    def _wait_until_idle(self, timeout: float) -> None:
+    def _wait_until_idle(self) -> None:
+        """
+        Wait for submissions that are being handled to finish their file work.
+
+        There is no time limit: giving up would leave files that nobody is
+        told about. The wait covers parsing and local file operations only,
+        never network writes. It polls so that Ctrl+C still gets through.
+        """
         with self._idle:
-            self._idle.wait_for(lambda: self._processing == 0, timeout=timeout)
+            while not self._idle.wait_for(lambda: self._processing == 0, timeout=0.5):
+                pass
 
     def release(self) -> None:
         """Let serve() return. Called after the final response has been written."""
@@ -615,7 +639,7 @@ class FormServer:
             _report_start_error(f'SSL configuration failed: {e}', e)
             raise
         except OSError as e:
-            _report_start_error(f'Cannot read the SSL certificate or key: {e}', e)
+            _report_start_error(f'Cannot read the SSL certificate or key: {e}', e, file_error=True)
             raise
         return context
 
@@ -625,7 +649,10 @@ class FormServer:
     def _display_host(self) -> str:
         """The host to put in the URL: an explicit url_host, the bind host, or a best-effort guess."""
         if self.url_host:
-            return self.url_host.strip('[]')  # _build_url adds the brackets
+            host = self.url_host
+            if host.startswith('[') and host.endswith(']'):
+                host = host[1:-1]  # _build_url adds the brackets
+            return host
         if not self.is_wildcard_host():
             return self.host
         address = _primary_address(ipv6=(self.host == '::'))
@@ -666,9 +693,18 @@ class FormServer:
 
         self._url = self._build_url(self.server.server_address[1])
         server_thread = threading.Thread(target=self._run_server, daemon=True)
-        started = False
 
         try:
+            # Write the URL file first: if that fails, nobody should have
+            # been shown a URL that is about to stop working.
+            if url_file:
+                try:
+                    with open(url_file, 'w', encoding='utf-8') as f:
+                        f.write(self._url + '\n')
+                except OSError as e:
+                    _report_start_error(f'Cannot write the URL file {url_file}: {e}', e, file_error=True)
+                    raise
+
             print(f'\nOpen this URL in your browser:\n  {self._url}', file=sys.stderr)
             if self.is_wildcard_host() and not self.url_host:
                 print('  (listening on all interfaces; the address above is this machine\'s '
@@ -676,18 +712,9 @@ class FormServer:
                       'pass --url-host with the right one.)', file=sys.stderr)
             print(file=sys.stderr)
 
-            if url_file:
-                try:
-                    with open(url_file, 'w', encoding='utf-8') as f:
-                        f.write(self._url + '\n')
-                except OSError as e:
-                    _report_start_error(f'Cannot write the URL file {url_file}: {e}', e)
-                    raise
-
             # Serve before launching the browser: some launchers block until
             # the page has loaded.
             server_thread.start()
-            started = True
             self._start_timer()
 
             if launch_browser_path is not None:
@@ -700,22 +727,37 @@ class FormServer:
             while not self.shutdown_event.wait(0.5):
                 pass
         finally:
-            with self._lock:
+            # Not "with self._lock": Ctrl+C can arrive in the instant after
+            # this thread acquired the lock in _start_timer() and before the
+            # with-block was entered, which leaves the lock held for ever
+            # (seen about once in 300 interrupts at start-up on a busy
+            # machine). Nothing holds this lock for more than a moment, so if
+            # it cannot be had, it was leaked that way: carry on as its
+            # owner and release it below so other threads are not stuck.
+            self._lock.acquire(timeout=_LOCK_GRACE)
+            try:
                 if self.timeout_timer is not None:
                     self.timeout_timer.cancel()
                     self.timeout_timer = None
                 if self._outcome is None:
                     self._outcome = OUTCOME_STOPPED
+            finally:
+                self._lock.release()
             self.shutdown_event.set()
             # A handler that lost the race (for example to the timeout) may
             # still be saving or removing uploaded files. Let it finish:
             # handler threads are daemons and would be killed mid-way when
             # the process exits, leaving files nobody is told about.
-            self._wait_until_idle(_PROCESSING_GRACE)
-            if started:
+            self._wait_until_idle()
+            # Ask the thread itself whether it is running rather than keep a
+            # flag: Ctrl+C can interrupt Thread.start() after the thread has
+            # begun. shutdown() is safe whether or not serve_forever() has
+            # been entered yet, but would block for ever on a thread that
+            # never ran.
+            if server_thread.is_alive():
                 self.server.shutdown()
             self.server.server_close()
-            if started:
+            if server_thread.is_alive():
                 server_thread.join(timeout=2.0)
             self._cleanup_upload_dir()
 
@@ -728,7 +770,10 @@ class FormServer:
         assert server is not None
         try:
             server.serve_forever(poll_interval=0.25)
-        except OSError as e:
+        except Exception as e:
+            # If we are shutting down, the listener may have been closed
+            # under us (Ctrl+C during start-up). Stay silent: printing from a
+            # daemon thread while the interpreter exits can abort the process.
             if not self.shutdown_event.is_set():
                 print(f'Server error: {e}', file=sys.stderr)
 

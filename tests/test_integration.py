@@ -647,7 +647,7 @@ class TestCLIProcessBehavior:
                 proc.communicate()
 
         assert proc.returncode == 130, \
-            f"Expected exit code 130 for interrupt, got {proc.returncode}"
+            f"Expected exit code 130 for interrupt, got {proc.returncode}; stderr: {stderr!r}"
         assert 'interrupt' in stderr.decode('utf-8').lower(), \
             "Error message should mention interruption"
 

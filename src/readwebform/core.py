@@ -111,6 +111,8 @@ def run_readwebform(args) -> int:
             # no traceback. The server has usually printed the reason.
             if not getattr(e, 'readwebform_reported', False):
                 print(f'Error: {e}', file=sys.stderr)
+            if getattr(e, 'readwebform_file_error', False):
+                return EXIT_READ_ERROR
             return EXIT_INTERNAL_ERROR
 
         if cancelled:
@@ -150,6 +152,10 @@ def run_readwebform(args) -> int:
         print('\nInterrupted by user', file=sys.stderr)
         return EXIT_INTERRUPTED
     except Exception as e:
+        if _caused_by_interrupt(e):
+            _emit_failure(args, 'interrupted')
+            print('\nInterrupted by user', file=sys.stderr)
+            return EXIT_INTERRUPTED
         print(f'Internal error: {e}', file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         return EXIT_INTERNAL_ERROR
@@ -195,16 +201,45 @@ def resolve_browser_launch(args) -> Optional[str]:
     return '' if gui_available() else None
 
 
-def _check_writable_file(path: str, what: str) -> None:
-    """Raise InputError unless a file can be created or overwritten at path."""
-    if os.path.isdir(path):
-        raise InputError(f'{what} {path} is a directory', EXIT_READ_ERROR)
+def _check_creatable_dir(path: str, what: str) -> None:
+    """Raise InputError unless path is, or can be created as, a writable directory."""
+    path = os.path.realpath(path)
     if os.path.exists(path):
-        if not os.access(path, os.W_OK):
+        if not os.path.isdir(path):
+            raise InputError(f'{what} {path} is not a directory', EXIT_READ_ERROR)
+        if not os.access(path, os.W_OK | os.X_OK):
             raise InputError(f'{what} {path} is not writable', EXIT_READ_ERROR)
         return
-    parent = os.path.dirname(path) or '.'
+    # It will be created on demand: the nearest existing ancestor decides
+    ancestor = os.path.dirname(path)
+    while ancestor and not os.path.exists(ancestor) and os.path.dirname(ancestor) != ancestor:
+        ancestor = os.path.dirname(ancestor)
+    if not os.path.isdir(ancestor):
+        raise InputError(f'{what} {path} cannot be created: {ancestor} is not a directory',
+                         EXIT_READ_ERROR)
+    if not os.access(ancestor, os.W_OK | os.X_OK):
+        raise InputError(f'{what} {path} cannot be created: {ancestor} is not writable',
+                         EXIT_READ_ERROR)
+
+
+def _check_writable_file(path: str, what: str, will_be_created: Optional[str] = None) -> None:
+    """
+    Raise InputError unless a file can be created or overwritten at path.
+
+    will_be_created names a directory that readwebform may create later (the
+    upload directory); a file inside it cannot be checked yet and is allowed.
+    """
+    if os.path.isdir(path):
+        raise InputError(f'{what} {path} is a directory', EXIT_READ_ERROR)
+    target = os.path.realpath(path)  # follows a symlink, including a dangling one
+    if os.path.exists(target):
+        if not os.access(target, os.W_OK):
+            raise InputError(f'{what} {path} is not writable', EXIT_READ_ERROR)
+        return
+    parent = os.path.dirname(target) or '.'
     if not os.path.isdir(parent):
+        if will_be_created and os.path.realpath(will_be_created) == parent:
+            return
         raise InputError(f'{what} {path}: the directory {parent} does not exist', EXIT_READ_ERROR)
     if not os.access(parent, os.W_OK | os.X_OK):
         raise InputError(f'{what} {path}: the directory {parent} is not writable', EXIT_READ_ERROR)
@@ -221,24 +256,45 @@ def check_paths(args) -> None:
     Raises:
         InputError: with exit code 3 if a path is unusable
     """
+    upload_dir = getattr(args, 'upload_dir', None)
+    if upload_dir:
+        _check_creatable_dir(upload_dir, 'The upload directory')
     envfile = getattr(args, 'envfile', None)
     if envfile:
-        _check_writable_file(envfile, 'The envfile')
+        _check_writable_file(envfile, 'The envfile', will_be_created=upload_dir)
     url_file = getattr(args, 'url_file', None)
     if url_file:
         _check_writable_file(url_file, 'The URL file')
-    upload_dir = getattr(args, 'upload_dir', None)
-    if upload_dir and os.path.exists(upload_dir):
-        if not os.path.isdir(upload_dir):
-            raise InputError(f'The upload directory {upload_dir} is not a directory', EXIT_READ_ERROR)
-        if not os.access(upload_dir, os.W_OK | os.X_OK):
-            raise InputError(f'The upload directory {upload_dir} is not writable', EXIT_READ_ERROR)
     for option, what in (('cert', 'The certificate'), ('key', 'The key')):
         path = getattr(args, option, None)
-        if path and not os.path.isfile(path):
+        if not path:
+            continue
+        # Not isfile(): a named pipe or /dev/fd/N from process substitution
+        # is a legitimate way to pass a key.
+        if os.path.isdir(path):
+            raise InputError(f'{what} file {path} is a directory', EXIT_READ_ERROR)
+        if not os.path.exists(path):
             raise InputError(f'{what} file {path} does not exist', EXIT_READ_ERROR)
-        if path and not os.access(path, os.R_OK):
+        if not os.access(path, os.R_OK):
             raise InputError(f'{what} file {path} is not readable', EXIT_READ_ERROR)
+
+
+def _caused_by_interrupt(error: BaseException) -> bool:
+    """
+    True if a KeyboardInterrupt is behind this exception.
+
+    Ctrl+C that lands inside threading internals (for example while a thread
+    is being started) can surface as "RuntimeError: release unlocked lock"
+    raised while the KeyboardInterrupt was being handled.
+    """
+    seen = set()
+    current: Optional[BaseException] = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, KeyboardInterrupt):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _emit_failure(args, error: str) -> None:

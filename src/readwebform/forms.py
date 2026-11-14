@@ -345,6 +345,8 @@ def dict_to_fieldspec(field_dict: dict) -> FieldSpec:
         ValueError: If the name or type is missing or invalid
     """
     name = field_dict.get('name')
+    if isinstance(name, str):
+        name = name.strip()  # as FieldSpec.parse does
     field_type = str(field_dict.get('type', '')).lower()
     if not name:
         raise ValueError('Field is missing a name')

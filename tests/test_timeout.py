@@ -5,7 +5,12 @@ These tests avoid asserting on narrow wall-clock windows. A timer can never
 fire early, so lower bounds are exact; upper bounds are generous (SLACK) and
 only catch a server that fails to stop. Whether the timer was restarted is
 checked against a timestamp taken just before the request that should (or
-should not) restart it, which holds however slowly the machine is running.
+should not) restart it.
+
+One real-time dependency remains: a test that sends a request to a live
+server needs it to arrive before the session timeout, so those tests use a
+timeout of 1.5 to 2 s and send at once. A machine stalled for longer than
+that between two lines of a test will still fail them.
 """
 
 import socket
@@ -132,26 +137,26 @@ class TestTimeoutBehavior:
 
     def test_timeout_reset_on_error(self):
         """A recoverable error restarts the full timeout."""
-        timeout = 1.0
+        # The POST must land before the first timer fires, so leave it room
+        timeout = 2.0
         session = Session(make_server(timeout, reset_timeout_on_error=True))
 
-        time.sleep(0.3)
+        time.sleep(0.2)
         before_post = time.monotonic()
         assert post_bad_token(session.url) == 403
 
         session.wait()
         assert session.server.timed_out is True
-        # Without the restart the server would stop about 0.7 s after the
+        # Without the restart the server would stop about 1.8 s after the
         # POST. With it, a full timeout must pass after the POST was sent.
         assert session.ended - before_post >= timeout - EPSILON
         assert session.server._timer_generation == 2
 
     def test_timeout_no_reset_on_error(self):
         """With reset_timeout_on_error=False an error leaves the timer alone."""
-        timeout = 1.0
+        timeout = 2.0
         session = Session(make_server(timeout, reset_timeout_on_error=False))
 
-        time.sleep(0.3)
         assert post_bad_token(session.url) == 403
         # The original timer is still the one that will fire.
         assert session.server._timer_generation == 1
@@ -162,12 +167,11 @@ class TestTimeoutBehavior:
 
     def test_get_requests_do_not_reset_timeout(self):
         """Loading the form does not restart the timer."""
-        session = Session(make_server(1.0))
+        session = Session(make_server(2.0))
 
         for _ in range(3):
             with urllib.request.urlopen(session.url, timeout=SLACK) as response:
                 assert response.status == 200
-            time.sleep(0.1)
         assert session.server._timer_generation == 1
 
         session.wait()
@@ -195,7 +199,7 @@ class TestTimeoutEdgeCases:
 
     def test_timeout_after_partial_submission(self):
         """A POST whose body never arrives does not hold the session open."""
-        timeout = 0.5
+        timeout = 1.5
         session = Session(make_server(timeout))
         host, port = urllib.parse.urlsplit(session.url).netloc.rsplit(':', 1)
 

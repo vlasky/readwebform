@@ -469,6 +469,7 @@ if result.success and result.files and 'document' in result.files:
 | `port` | `None` | Port to bind to (default: auto-select) |
 | `cert_file`, `key_file` | `None` | PEM certificate and key to serve HTTPS |
 | `url_file` | `None` | Write the form URL to this file once listening |
+| `url_host` | `None` | Host name or address to put in the URL instead of the bind address |
 | `upload_dir` | `None` | Directory for uploads (default: temporary directory created on first upload) |
 
 #### `read_webform_fields(fields, title=None, text=None, **kwargs)`
@@ -652,7 +653,7 @@ See [SPEC.md](SPEC.md) for the full design specification. This document covers a
 
 ### Test Coverage
 
-- **More than 330 tests** across 13 files
+- **More than 370 tests** across 14 files
   - Unit tests for the multipart parser, HTML rewriting, declarative forms, output formatting, CLI parsing and the Python API
   - Integration tests that run a real server on a random port: submissions, uploads, CSRF, size limits, timeouts, the CLI as a subprocess (exit codes 2, 5 and 130)
   - Hardening regressions: byte-exact uploads, UTF-8 filenames, repeated file fields, negative Content-Length, HTTP 410 on a second submission, listener release, concurrent servers, IPv6, idle HTTP and TLS connections

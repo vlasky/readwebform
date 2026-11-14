@@ -183,28 +183,53 @@ class TestSubmissionIsNotLost:
         assert 'Traceback' not in err
 
 
-class TestContentLength:
-    @pytest.mark.parametrize('value', ['+10', '1_0', '\u0661\u0660', '-1', '', '10.0', '0x10'])
-    def test_only_ascii_digits_accepted(self, value):
-        html = wrap_html_fragment('<form><input name="a"><button>Go</button></form>')
-        server = FormServer(html=html, host='127.0.0.1', port=0, timeout=10)
-        server.html = inject_csrf_token(html, server.csrf_token, server.endpoint)
+def start_server(**kwargs):
+    """Start an in-process FormServer; return (server, thread, host, port)."""
+    html = wrap_html_fragment('<form enctype="multipart/form-data"><input name="a">'
+                              '<input type="file" name="f" multiple><button>Go</button></form>')
+    server = FormServer(html=html, host='127.0.0.1', port=0, **kwargs)
+    server.html = inject_csrf_token(html, server.csrf_token, server.endpoint)
+    outcome = {}
 
-        thread = threading.Thread(target=server.serve, daemon=True)
-        thread.start()
+    def run():
         try:
-            while not server.get_url():
-                time.sleep(0.005)
-            host, port = urllib.parse.urlsplit(server.get_url()).netloc.rsplit(':', 1)
-            with socket.create_connection((host, int(port)), timeout=10) as sock:
+            outcome['result'] = server.serve()
+        except BaseException as e:  # reported by the readiness wait below
+            outcome['error'] = e
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 30
+    while not server.get_url():
+        assert 'error' not in outcome, f'server failed to start: {outcome["error"]!r}'
+        assert time.monotonic() < deadline, 'server did not start'
+        time.sleep(0.005)
+    host, port = urllib.parse.urlsplit(server.get_url()).netloc.rsplit(':', 1)
+    return server, thread, host, int(port), outcome
+
+
+class TestContentLength:
+    @pytest.mark.parametrize('value,expected', [
+        ('+10', 400), ('1_0', 400), ('\u0661\u0660', 400), ('-1', 400), ('', 400),
+        ('10.0', 400), ('0x10', 400),
+        # A number, but Python 3.11+ refuses to convert this many digits.
+        # It must be answered as too large, not drop the connection.
+        pytest.param('9' * 5000, 413, id='5000-digits'),
+    ])
+    def test_only_ascii_digits_accepted(self, value, expected):
+        """Anything but a plain decimal number is HTTP 400."""
+        server, thread, host, port, _ = start_server(timeout=30)
+        try:
+            with socket.create_connection((host, port), timeout=30) as sock:
+                # Headers only: unread body bytes would make the server's
+                # close a reset on some platforms and lose the response.
                 sock.sendall(f'POST {server.endpoint} HTTP/1.1\r\nHost: x\r\n'
-                             f'Content-Length: {value}\r\nConnection: close\r\n\r\n'
-                             'abcdefghij'.encode())
+                             f'Content-Length: {value}\r\nConnection: close\r\n\r\n'.encode())
                 status = sock.makefile('rb').readline()
-            assert b' 400 ' in status
+            assert f' {expected} '.encode() in status
         finally:
             server.shutdown_event.set()
-            thread.join(timeout=10)
+            thread.join(timeout=30)
 
 
 class TestUploadSaving:
@@ -228,28 +253,226 @@ class TestUploadSaving:
         assert names == ['x.txt', 'x_2.txt', 'x_3.txt']
         assert (tmp_path / 'x_1.txt').read_text() == 'already here'
 
-    def test_no_files_left_when_timeout_fires_during_save(self, tmp_path):
-        """A submission that loses to the timeout removes what it had saved."""
+    def test_no_files_left_when_timeout_fires_during_save(self, tmp_path, monkeypatch):
+        """A submission that loses to the timeout removes what it had saved,
+        and serve() does not return until it has."""
+        import readwebform.server as server_module
+
         upload_dir = tmp_path / 'up'
-        cli = LiveCLI('--no-launch-browser', '--field', 'f:file', '--timeout', '1',
-                      '--upload-dir', str(upload_dir))
-        parts = [b'Content-Disposition: form-data; name="_csrf_token"\r\n\r\n' + cli.token.encode()]
-        parts += [b'Content-Disposition: form-data; name="f"; filename="x.txt"\r\n\r\nD'] * 30000
+        server, thread, _, _, outcome = start_server(timeout=600, upload_dir=str(upload_dir))
+        real_save = server_module.save_uploaded_file
+        saved = []
+        files_seen_at_timeout = []
+
+        def save_then_time_out(uploaded_file, directory, next_suffix=None):
+            path = real_save(uploaded_file, directory, next_suffix)
+            saved.append(path)
+            if len(saved) == 2:
+                # The session times out while this handler is mid-way...
+                server._on_timeout(server._timer_generation)
+                files_seen_at_timeout.extend(os.listdir(directory))
+                # ...and serve() gets every chance to return before the
+                # handler has cleaned up. It must wait instead.
+                time.sleep(0.5)
+            return path
+
+        monkeypatch.setattr(server_module, 'save_uploaded_file', save_then_time_out)
+
+        parts = [b'Content-Disposition: form-data; name="_csrf_token"\r\n\r\n' + server.csrf_token.encode()]
+        parts += [b'Content-Disposition: form-data; name="f"; filename="f%d.txt"\r\n\r\nD' % i
+                  for i in range(5)]
         body = b''.join(b'--XX\r\n' + p + b'\r\n' for p in parts) + b'--XX--\r\n'
         request = urllib.request.Request(
-            cli.url, data=body, headers={'Content-Type': 'multipart/form-data; boundary=XX'})
+            server.get_url(), data=body, headers={'Content-Type': 'multipart/form-data; boundary=XX'})
         try:
-            status = urllib.request.urlopen(request, timeout=60).status
+            status = urllib.request.urlopen(request, timeout=30).status
         except urllib.error.HTTPError as e:
             status = e.code
-        returncode, out, _ = cli.finish()
+        except (urllib.error.URLError, ConnectionError):
+            status = None  # the server closed the connection as it shut down
 
-        if status == 200:
-            # This machine saved 30,000 files inside the timeout: nothing to check
-            assert returncode == 0
-            assert len(list(upload_dir.iterdir())) == 30000
-        else:
-            assert status == 410
-            assert returncode == 5
-            assert json.loads(out)['files'] == {}
-            assert not upload_dir.exists() or list(upload_dir.iterdir()) == []
+        thread.join(timeout=30)
+        assert not thread.is_alive()
+        # Checked the moment serve() has returned, with no further waiting
+        leftover = os.listdir(upload_dir) if upload_dir.exists() else []
+
+        assert len(saved) == 2, 'saving must stop once the session is over'
+        assert len(files_seen_at_timeout) == 2, 'two files were on disk when the timeout fired'
+        assert leftover == []
+        assert status in (410, None)
+        assert server.timed_out is True
+        assert outcome['result'] == (False, None, {}, False)
+
+
+class TestReviewFollowUps:
+    """Defects in the first round of fixes, found by review."""
+
+    def test_url_file_failure_inside_serve_is_a_file_error(self, tmp_path, monkeypatch, capsys):
+        """A URL file that passes the check but cannot be written exits 3,
+        and no URL is announced."""
+        from readwebform import core
+        from readwebform.cli import ReadWebFormArgumentParser
+
+        monkeypatch.setattr(core, 'check_paths', lambda args: None)
+        args = ReadWebFormArgumentParser().parse_args(
+            [*BASE, '--url-file', str(tmp_path / 'missing' / 'url.txt')])
+        assert core.run_readwebform(args) == 3
+        err = capsys.readouterr().err
+        assert 'Cannot write the URL file' in err
+        assert 'http://' not in err
+        assert 'Traceback' not in err
+
+    @posix_only
+    def test_dangling_symlink_is_checked_at_its_target(self, tmp_path):
+        link = tmp_path / 'link'
+        link.symlink_to(tmp_path / 'missing' / 'target')
+        result = run_cli(*BASE, '--url-file', str(link))
+        assert result.returncode == 3
+        assert b'does not exist' in result.stderr
+
+    def test_upload_dir_below_a_file_is_rejected(self, tmp_path):
+        blocker = tmp_path / 'file'
+        blocker.write_text('')
+        result = run_cli(*BASE, '--upload-dir', str(blocker / 'uploads'))
+        assert result.returncode == 3
+        assert b'cannot be created' in result.stderr
+
+    def test_new_nested_upload_dir_is_accepted(self, tmp_path):
+        result = run_cli(*BASE, '--timeout', '0.2', '--upload-dir', str(tmp_path / 'a' / 'b'))
+        assert result.returncode == 5
+
+    def test_envfile_inside_upload_dir_that_does_not_exist_yet(self, tmp_path):
+        uploads = tmp_path / 'uploads'
+        result = run_cli(*BASE, '--timeout', '0.2', '--upload-dir', str(uploads),
+                         '--envfile', str(uploads / 'vars.env'))
+        assert result.returncode == 5, result.stderr
+
+    @posix_only
+    def test_whitespace_file_name_is_a_real_name(self, tmp_path):
+        form = tmp_path / ' '
+        form.write_text('<form><input name="a"><button>Go</button></form>')
+        result = run_cli('--no-launch-browser', '--timeout', '0.2', '--htmlfile', str(form))
+        assert result.returncode == 5, result.stderr
+        result = subprocess.run([sys.executable, '-m', 'readwebform', *BASE, '--timeout', '0.2',
+                                 '--envfile', ' '], capture_output=True, cwd=tmp_path,
+                                stdin=subprocess.DEVNULL, timeout=30)
+        assert result.returncode == 5, result.stderr
+
+    @posix_only
+    def test_key_from_a_named_pipe_passes_the_path_check(self, tmp_path):
+        import argparse
+
+        from readwebform.core import check_paths
+
+        fifo = tmp_path / 'key.fifo'
+        os.mkfifo(fifo)
+        check_paths(argparse.Namespace(cert=str(fifo), key=str(fifo)))
+
+    @pytest.mark.parametrize('value', ['example.com', '192.0.2.7', '::1', '[::1]', 'fe80::1%en0',
+                                       '[2001:db8::1]', 'bücher.example', 'my_host'])
+    def test_url_host_accepted(self, value):
+        from readwebform.cli import is_valid_url_host
+        assert is_valid_url_host(value)
+
+    @pytest.mark.parametrize('value', ['[]', '[[]]', 'example.com:8080', '[::1]:8080', 'foo]bar',
+                                       '[example.com]', 'a\x7fb', ':', 'a b'])
+    def test_url_host_rejected(self, value):
+        from readwebform.cli import is_valid_url_host
+        assert not is_valid_url_host(value)
+
+    @pytest.mark.parametrize('name', [' _cancel ', '   '])
+    def test_api_field_names_are_stripped_before_checking(self, name):
+        from readwebform.forms import dict_to_fieldspec
+        with pytest.raises(ValueError):
+            dict_to_fieldspec({'name': name, 'type': 'text'})
+
+
+class TestInterruptDuringStartup:
+    """Ctrl+C in the instant the server is starting.
+
+    Found by interrupting the CLI thousands of times on a busy machine: about
+    one run in 150 exited 1 with a traceback, aborted, or hung.
+    """
+
+    def _args(self):
+        from readwebform.cli import ReadWebFormArgumentParser
+        return ReadWebFormArgumentParser().parse_args(BASE)
+
+    def test_interrupt_surfacing_as_another_exception_is_still_an_interrupt(self, monkeypatch, capsys):
+        """CPython can turn Ctrl+C inside Thread.start() into
+        'RuntimeError: release unlocked lock' raised while handling it."""
+        from readwebform import core
+
+        def serve(self, **kwargs):
+            try:
+                raise KeyboardInterrupt
+            except KeyboardInterrupt:
+                raise RuntimeError('release unlocked lock')  # noqa: B904
+
+        monkeypatch.setattr(FormServer, 'serve', serve)
+        assert core.run_readwebform(self._args()) == 130
+        captured = capsys.readouterr()
+        assert 'Interrupted by user' in captured.err
+        assert 'Traceback' not in captured.err
+        assert json.loads(captured.out)['error'] == 'interrupted'
+
+    def test_unrelated_runtime_error_is_still_an_internal_error(self, monkeypatch, capsys):
+        from readwebform import core
+
+        def serve(self, **kwargs):
+            raise RuntimeError('something else')
+
+        monkeypatch.setattr(FormServer, 'serve', serve)
+        assert core.run_readwebform(self._args()) == 1
+        assert 'Internal error' in capsys.readouterr().err
+
+    def test_serve_does_not_hang_when_the_interrupt_leaked_the_state_lock(self, monkeypatch):
+        import readwebform.server as server_module
+
+        monkeypatch.setattr(server_module, '_LOCK_GRACE', 0.2)
+        server = FormServer(html='<form></form>', host='127.0.0.1', port=0, timeout=600)
+
+        def start_timer_interrupted():
+            server._lock.acquire()  # as if Ctrl+C landed just after acquiring
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(server, '_start_timer', start_timer_interrupted)
+        raised = []
+
+        def run():
+            try:
+                server.serve()
+            except KeyboardInterrupt as e:
+                raised.append(e)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(timeout=30)
+        assert not thread.is_alive(), 'serve() hung on the leaked lock'
+        assert raised, 'the interrupt must still propagate'
+        assert server._lock.acquire(timeout=1), 'the lock must be usable again'
+        server._lock.release()
+
+    def test_interrupt_inside_thread_start_shuts_the_server_thread_down(self, monkeypatch, capfd):
+        """The thread may already be running when Thread.start() is interrupted."""
+        original_start = threading.Thread.start
+        started = []
+
+        def start(self):
+            original_start(self)
+            if getattr(self._target, '__name__', '') == '_run_server':
+                started.append(self)
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(threading.Thread, 'start', start)
+        server = FormServer(html='<form></form>', host='127.0.0.1', port=0, timeout=600)
+        with pytest.raises(KeyboardInterrupt):
+            server.serve()
+        monkeypatch.undo()
+
+        assert started, 'the server thread was started'
+        started[0].join(timeout=30)
+        assert not started[0].is_alive(), 'the server thread must not be left running'
+        err = capfd.readouterr().err
+        assert 'Exception in thread' not in err
+        assert 'Server error' not in err

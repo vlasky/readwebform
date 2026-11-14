@@ -3,6 +3,7 @@ Command-line interface for readwebform.
 """
 
 import argparse
+import ipaddress
 import math
 import re
 import sys
@@ -20,6 +21,27 @@ class _ArgumentParser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
         self.exit(EXIT_INVALID_ARGUMENT, f'{self.prog}: error: {message}\n')
+
+
+def is_valid_url_host(value: str) -> bool:
+    """
+    True if value can stand as the host in a URL: a host name, an IPv4
+    address, or an IPv6 address with or without brackets. A port is not
+    allowed; the server's own port is appended.
+    """
+    if value.startswith('[') and value.endswith(']'):
+        value = value[1:-1]
+        bracketed = True
+    else:
+        bracketed = False
+    if ':' in value or bracketed:
+        try:
+            ipaddress.IPv6Address(value.split('%', 1)[0])  # a zone id may follow %
+        except ValueError:
+            return False
+        return re.fullmatch(r'[0-9A-Za-z:.%_-]+', value) is not None
+    # Host name or IPv4. Non-ASCII letters are allowed (internationalised names).
+    return re.fullmatch(r'[^\s/?#@"<>\\\[\]\x00-\x1f\x7f]+', value) is not None
 
 
 class ReadWebFormArgumentParser:
@@ -239,14 +261,18 @@ class ReadWebFormArgumentParser:
         # An empty value is almost always an unset shell variable. Several of
         # these would otherwise be silently ignored, and an empty --host
         # binds every interface.
-        for option in ('host', 'url_host', 'envfile', 'url_file', 'upload_dir', 'cert', 'key',
-                       'htmlfile', 'max_file_size', 'max_total_size'):
+        for option in ('host', 'url_host', 'max_file_size', 'max_total_size'):
             value = getattr(args, option, None)
             if value is not None and not value.strip():
                 self.parser.error(f'--{option.replace("_", "-")} must not be empty')
+        # Paths are compared exactly: a file may legitimately be named ' '
+        for option in ('envfile', 'url_file', 'upload_dir', 'cert', 'key', 'htmlfile'):
+            if getattr(args, option, None) == '':
+                self.parser.error(f'--{option.replace("_", "-")} must not be empty')
 
-        if args.url_host is not None and not re.fullmatch(r'[^\s/?#@"<>\\\x00-\x1f]+', args.url_host):
-            self.parser.error('--url-host must be a host name or IP address')
+        if args.url_host is not None and not is_valid_url_host(args.url_host):
+            self.parser.error('--url-host must be a host name or an IP address, without a port '
+                              '(write IPv6 addresses as ::1 or [::1])')
 
         if args.cert and not args.key:
             self.parser.error('--cert requires --key')
