@@ -609,7 +609,14 @@ class TestCLIProcessBehavior:
     @pytest.mark.skipif(sys.platform == 'win32', reason='SIGINT semantics differ on Windows')
     def test_process_handles_keyboard_interrupt(self):
         """Test that process exits gracefully on keyboard interrupt."""
-        # Run readwebform as subprocess
+        import signal
+
+        def default_sigint():
+            # A test run started as a shell background job inherits SIGINT
+            # ignored, and Python then never raises KeyboardInterrupt. Give
+            # the child the disposition a terminal would.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+
         proc = subprocess.Popen(
             [
                 sys.executable, '-m', 'readwebform', '--no-launch-browser',
@@ -618,28 +625,30 @@ class TestCLIProcessBehavior:
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            preexec_fn=default_sigint,  # noqa: PLW1509 (only resets a signal)
         )
+        assert proc.stderr is not None
 
-        # Wait for server to start
-        time.sleep(0.5)
-
-        # Send SIGINT (Ctrl+C)
-        import signal
-        proc.send_signal(signal.SIGINT)
-
-        # Wait for process to exit
         try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            pytest.fail("Process did not exit within 2 seconds after SIGINT")
+            # Wait until the URL is printed: the server is then running and
+            # the interrupt handler is in place. A fixed sleep here sent the
+            # signal during interpreter start-up on a slow or busy machine.
+            seen = b''
+            while b'http://127.0.0.1:' not in seen:
+                line = proc.stderr.readline()
+                assert line, f'process exited before printing its URL: {seen!r}'
+                seen += line
 
-        # Should return exit code 1 for keyboard interrupt
+            proc.send_signal(signal.SIGINT)
+            _, stderr = proc.communicate(timeout=15)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.communicate()
+
         assert proc.returncode == 130, \
             f"Expected exit code 130 for interrupt, got {proc.returncode}"
-
-        stderr = proc.stderr.read().decode('utf-8')
-        assert 'Interrupted' in stderr or 'interrupt' in stderr.lower(), \
+        assert 'interrupt' in stderr.decode('utf-8').lower(), \
             "Error message should mention interruption"
 
     def test_invalid_html_exits_with_error_code(self):

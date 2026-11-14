@@ -87,8 +87,14 @@ class TestGuiAvailable:
 
 
 @posix_only
-def test_custom_launcher_exit_status_is_reported(tmp_path):
+def test_custom_launcher_exit_status_is_reported(tmp_path, monkeypatch):
+    from readwebform import browser
     from readwebform.browser import launch_browser
+
+    # The exit status is only seen if the launcher finishes inside the wait
+    # window. On a busy machine a trivial script can take longer than the
+    # production 1 s, so widen it: this test is about the status, not the window.
+    monkeypatch.setattr(browser, '_LAUNCH_WAIT', 60.0)
     ok = tmp_path / 'ok.sh'
     ok.write_text('#!/bin/sh\nexit 0\n')
     bad = tmp_path / 'bad.sh'
