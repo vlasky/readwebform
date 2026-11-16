@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## [0.4.1] - 2026-11-16
+
+A bug-fix release. Three of the fixes are stricter than 0.4.0 and could affect a script:
+
+- Empty option values are rejected with exit code 8 (`--host ""` used to bind every interface; an empty `--envfile` or `--url-file` was silently ignored)
+- `--field` and the Python API reject the field names `_cancel` and `_csrf_token`
+- Exit code 3 now means any file named on the command line could not be read or written (envfile, URL file, upload directory, certificate, key), and those paths are checked before the form is shown. Exit code 1 also covers a server that could not start
 
 ### Changed
 
